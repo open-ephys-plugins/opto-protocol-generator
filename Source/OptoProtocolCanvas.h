@@ -31,6 +31,34 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 class OptoProtocolGenerator;
 class OptoProtocolInterface;
 
+/** 
+  Interface for selecting stimulus colours
+ */
+
+class ColourSelectorWidget : public Component,
+                       public Button::Listener
+{
+public:
+    /** Constructor */
+    ColourSelectorWidget(Stimulus* stimulus,
+                   OptoProtocolInterface* parent);
+    
+    /** Destructor */
+    ~ColourSelectorWidget() { }
+    
+    /** Respond to button clicks */
+    void buttonClicked(Button* button) override;
+    
+private:
+    /** Buttons */
+    std::unique_ptr<TextButton> redButton;
+    std::unique_ptr<TextButton> blueButton;
+    std::unique_ptr<Label> wavelengthLabel;
+    
+    Stimulus* stimulus;
+    OptoProtocolInterface* parent;
+};
+
 
 /**
 * Interface for editing an opto sequence
@@ -56,6 +84,7 @@ protected:
     
     std::unique_ptr<ComboBoxParameterEditor> sourceEditor;
     std::unique_ptr<SelectedChannelsParameterEditor> siteEditor;
+    std::unique_ptr<ColourSelectorWidget> colourSelectorWidget;
     
     Stimulus* stimulus;
     OptoProtocolInterface* parent;
@@ -82,6 +111,8 @@ public:
     
 private:
     
+    std::unique_ptr<Label> stimulusTypeLabel;
+    
     std::unique_ptr<BoundedValueParameterEditor> pulseWidthEditor;
     std::unique_ptr<BoundedValueParameterEditor> pulseFrequencyEditor;
     std::unique_ptr<BoundedValueParameterEditor> pulseCountEditor;
@@ -100,7 +131,8 @@ class OptoSequenceInterface : public Component,
 public:
 
     /** Constructor */
-    OptoSequenceInterface(Sequence* sequence,
+    OptoSequenceInterface(const String& name,
+                          Sequence* sequence,
                           OptoProtocolInterface* parent);
     
     /** Destructor */
@@ -120,6 +152,7 @@ private:
     OwnedArray<OptoStimulusInterface> stimulusInterfaces;
     
     std::unique_ptr<TextButton> addStimulusButton;
+    std::unique_ptr<Label> sequenceNameLabel;
     
     std::unique_ptr<BoundedValueParameterEditor> baselineIntervalEditor;
     std::unique_ptr<BoundedValueParameterEditor> minItiEditor;
@@ -128,6 +161,9 @@ private:
     
     Sequence* sequence;
     OptoProtocolInterface* parent;
+    
+    const int stimInterfaceHeight = 146;
+    const int stimInterfaceWidth = 365;
 
 };
 
@@ -142,13 +178,16 @@ class OptoProtocolInterface : public Component,
 public:
 
     /** Constructor */
-    OptoProtocolInterface(const String& name);
+    OptoProtocolInterface(const String& name, Viewport* viewport);
     
     /** Destructor */
     ~OptoProtocolInterface();
     
     /** Sets component layout */
     void resized() override;
+    
+    /** Changes bounds to fit sequence interfaces */
+    void updateBounds(int expandBy = 0);
     
    /** Draws the content background */
    void paint(Graphics& g) override;
@@ -166,6 +205,8 @@ private:
     std::unique_ptr<TextButton> addSequenceButton;
     
     std::unique_ptr<Protocol> protocol;
+    
+    Viewport* viewport;
 
 };
 

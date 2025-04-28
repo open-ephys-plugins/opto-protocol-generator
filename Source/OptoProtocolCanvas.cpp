@@ -23,6 +23,46 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "OptoProtocolCanvas.h"
 
+ColourSelectorWidget::ColourSelectorWidget(Stimulus* stimulus_, OptoProtocolInterface* parent_)
+    : stimulus(stimulus_), parent(parent_)
+{
+    redButton = std::make_unique<TextButton>("redButton");
+    redButton->setButtonText("638");
+    redButton->setClickingTogglesState(true);
+    redButton->setToggleState(true, dontSendNotification);
+    redButton->setColour(TextButton::buttonColourId, Colours::darkgrey);
+    redButton->setColour(TextButton::buttonOnColourId, Colours::red);
+    redButton->setColour(TextButton::textColourOnId, Colours::white);
+    redButton->setColour(TextButton::textColourOffId, Colours::white);
+    redButton->addListener(this);
+    addAndMakeVisible(redButton.get());
+    redButton->setBounds(46, 0, 40, 20);
+    
+    blueButton = std::make_unique<TextButton>("blueButton");
+    blueButton->setButtonText("450");
+    blueButton->setClickingTogglesState(true);
+    blueButton->setToggleState(false, dontSendNotification);
+    blueButton->setColour(TextButton::buttonColourId, Colours::darkgrey);
+    blueButton->setColour(TextButton::buttonOnColourId, Colour(38, 173, 252));
+    blueButton->setColour(TextButton::textColourOnId, Colours::white);
+    blueButton->setColour(TextButton::textColourOffId, Colours::white);
+    blueButton->addListener(this);
+    addAndMakeVisible(blueButton.get());
+    blueButton->setBounds(0, 0, 40, 20);
+    
+    wavelengthLabel = std::make_unique<Label>("wavelengthLabel", "Wavelength");
+    wavelengthLabel->setFont(FontOptions ("Inter", "Regular", 13.5));
+    wavelengthLabel->setJustificationType(Justification::centredLeft);
+    addAndMakeVisible(wavelengthLabel.get());
+    wavelengthLabel->setBounds(90, 0, 100, 20);
+}
+
+void ColourSelectorWidget::buttonClicked(Button* button)
+{
+    
+}
+
+
 PulseTrainInterface::PulseTrainInterface(PulseTrain* pulse_train_,
                                              OptoProtocolInterface* parent_)
     : OptoStimulusInterface(pulse_train_, parent_), pulse_train(pulse_train_)
@@ -36,6 +76,11 @@ PulseTrainInterface::PulseTrainInterface(PulseTrain* pulse_train_,
     addAndMakeVisible(pulseCountEditor.get());
     pulsePowerEditor = std::make_unique<BoundedValueParameterEditor>(&pulse_train->pulse_power);
     addAndMakeVisible(pulsePowerEditor.get());
+    
+    stimulusTypeLabel = std::make_unique<Label>("stimulusTypeLabel", "Pulse train");
+    stimulusTypeLabel->setFont(FontOptions ("Inter", "Regular", 17));
+    stimulusTypeLabel->setJustificationType(Justification::centredLeft);
+    addAndMakeVisible(stimulusTypeLabel.get());
     
     setBounds(0, 0, 0, 400);
 }
@@ -51,10 +96,11 @@ void PulseTrainInterface::resized()
     
     OptoStimulusInterface::resized();
     
-    pulseWidthEditor->setBounds(15, 80, 150, 20);
-    pulseFrequencyEditor->setBounds(15, 110, 150, 20);
-    pulseCountEditor->setBounds(15, 140, 150, 20);
-    pulsePowerEditor->setBounds(15, 170, 150, 20);
+    stimulusTypeLabel->setBounds(12, 12, 100, 20);
+    pulseWidthEditor->setBounds(190, 50, 150, 20);
+    pulseFrequencyEditor->setBounds(190, 80, 150, 20);
+    pulseCountEditor->setBounds(190, 110, 150, 20);
+    pulsePowerEditor->setBounds(15, 110, 150, 20);
     
 }
 
@@ -68,6 +114,8 @@ OptoStimulusInterface::OptoStimulusInterface(Stimulus* stimulus_,
     addAndMakeVisible(sourceEditor.get());
     siteEditor = std::make_unique<SelectedChannelsParameterEditor>(stimulus->sites.get());
     addAndMakeVisible(siteEditor.get());
+    colourSelectorWidget = std::make_unique<ColourSelectorWidget>(stimulus, parent);
+    addAndMakeVisible(colourSelectorWidget.get());
     
     setBounds(0, 0, 0, 400);
 }
@@ -80,20 +128,31 @@ OptoStimulusInterface::~OptoStimulusInterface()
     
 void OptoStimulusInterface::resized()
 {
-    sourceEditor->setBounds(15, 20, 180, 20);
-    siteEditor->setBounds(15, 50, 180, 20);
+    sourceEditor->setBounds(190, 15, 180, 20);
+    colourSelectorWidget->setBounds(15, 50, 180, 20);
+    siteEditor->setBounds(15, 80, 150, 20);
 }
     
 void OptoStimulusInterface::paint(Graphics& g)
 {
-    
+    g.setColour(findColour(ThemeColours::defaultText).withAlpha(0.5f));
+    g.fillRoundedRectangle(0, 0, getWidth(), getHeight(), 7);
+    g.setColour(findColour(ThemeColours::widgetBackground).withAlpha(0.8f));
+    g.fillRoundedRectangle(2, 2, getWidth()-4, getHeight()-4, 5);
 }
 
 
-OptoSequenceInterface::OptoSequenceInterface(Sequence* sequence_,
+OptoSequenceInterface::OptoSequenceInterface(const String& name,
+                                             Sequence* sequence_,
                                              OptoProtocolInterface* parent_)
     : sequence(sequence_), parent(parent_)
 {
+    
+    sequenceNameLabel = std::make_unique<Label>("sequenceLabel", name);
+    sequenceNameLabel->setFont(FontOptions ("Inter", "Regular", 15));
+    sequenceNameLabel->setJustificationType(Justification::centredLeft);
+    addAndMakeVisible(sequenceNameLabel.get());
+    
     addStimulusButton = std::make_unique<TextButton>("addStimulusButton");
     addStimulusButton->setButtonText("Add Stimulus");
     addStimulusButton->addListener(this);
@@ -109,7 +168,7 @@ OptoSequenceInterface::OptoSequenceInterface(Sequence* sequence_,
                                             availableWavelengths);
     
     sequence->conditions.add(new Condition(parent));
-    sequence->conditions[0]->stimuli.add(pulseTrain);
+    sequence->conditions.getLast()->stimuli.add(pulseTrain);
     
     stimulusInterfaces.add(new PulseTrainInterface(pulseTrain, parent));
     addAndMakeVisible(stimulusInterfaces.getLast());
@@ -123,7 +182,7 @@ OptoSequenceInterface::OptoSequenceInterface(Sequence* sequence_,
     randomizeEditor = std::make_unique<ToggleParameterEditor>(&sequence->randomize);
     addAndMakeVisible(randomizeEditor.get());
     
-    setBounds(0, 0, 0, 800);
+    setBounds(0, 0, 0, 230 + stimInterfaceHeight);
 }
     
 
@@ -137,24 +196,29 @@ void OptoSequenceInterface::resized()
     
     int leftMargin = 15;
     
-    addStimulusButton->setBounds(leftMargin, 20, 140, 20);
+    sequenceNameLabel->setBounds(leftMargin-5, 20, 140, 20);
+    
     baselineIntervalEditor->setBounds(leftMargin, 50, 150, 20);
     minItiEditor->setBounds(leftMargin, 80, 150, 20);
     maxItiEditor->setBounds(leftMargin, 110, 150, 20);
     randomizeEditor->setBounds(leftMargin, 140, 150, 20);
     
-    int currentHeight = 160;
+    int currentHeight = 180;
     
     for (auto interface : stimulusInterfaces)
     {
-        interface->setBounds(15, currentHeight, 300, 300);
-        currentHeight += 320;
+        interface->setBounds(15, currentHeight, stimInterfaceWidth, stimInterfaceHeight);
+        currentHeight += stimInterfaceHeight + 10;
     }
+    
+    addStimulusButton->setBounds(265, currentHeight+6, 100, 20);
 }
     
 void OptoSequenceInterface::paint(Graphics& g)
 {
-    
+    g.setColour(findColour(ThemeColours::defaultText));
+    g.drawLine(93, 31, 365, 32, 1.0f);
+
 }
 
 
@@ -163,12 +227,32 @@ void OptoSequenceInterface::buttonClicked(Button* button)
     if (button == addStimulusButton.get())
     {
         // add stimulus
+        LOGD("Add stimulus button clicked.");
+        
+        Array<String> availableSources = {"Probe A", "Probe B"};
+        Array<int> sitesPerSource = {14, 14};
+        Array<int> availableWavelengths = {450, 538};
+        
+        PulseTrain* pulseTrain = new PulseTrain(parent,
+                                                availableSources,
+                                                sitesPerSource,
+                                                availableWavelengths);
+        
+        sequence->conditions.add(new Condition(parent));
+        sequence->conditions.getLast()->stimuli.add(pulseTrain);
+        
+        stimulusInterfaces.add(new PulseTrainInterface(pulseTrain, parent));
+        addAndMakeVisible(stimulusInterfaces.getLast());
+        
+        int numInterfaces =stimulusInterfaces.size();
+        setBounds(0,0,0,230 + (10 + stimInterfaceHeight) * numInterfaces);
+        parent->updateBounds(stimInterfaceHeight);
     }
 }
     
 
-OptoProtocolInterface::OptoProtocolInterface(const String& name)
-    : ParameterOwner(ParameterOwner::OTHER)
+OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewport_)
+    : ParameterOwner(ParameterOwner::OTHER), viewport(viewport_)
 {
 
     protocol = std::make_unique<Protocol>(name, this);
@@ -176,7 +260,7 @@ OptoProtocolInterface::OptoProtocolInterface(const String& name)
     Sequence* defaultSequence = new Sequence(this);
     
     protocol->sequences.add(defaultSequence);
-    sequenceInterfaces.add(new OptoSequenceInterface(defaultSequence, this));
+    sequenceInterfaces.add(new OptoSequenceInterface("Sequence 1", defaultSequence, this));
     addAndMakeVisible(sequenceInterfaces.getLast());
     
     addSequenceButton = std::make_unique<TextButton>("addSequenceButton");
@@ -192,11 +276,24 @@ OptoProtocolInterface::~OptoProtocolInterface()
     // Destructor implementation
 }
 
+void OptoProtocolInterface::updateBounds(int expandBy)
+{
+    int currentHeight = 60;
+    
+    for (auto interface : sequenceInterfaces)
+    {
+        currentHeight += interface->getHeight();
+    }
+    
+    int currentScrollDistance = viewport->getViewPositionY();
+    setBounds(0, 0, getWidth(), currentHeight);
+    viewport->setViewPosition(0, currentScrollDistance + expandBy);
+}
+
 void OptoProtocolInterface::resized()
 {
+
     int leftMargin = 15;
-    addSequenceButton->setBounds(leftMargin, 10, 150, 20);
-    
     int currentHeight = 30;
     
     for (auto interface : sequenceInterfaces)
@@ -204,6 +301,8 @@ void OptoProtocolInterface::resized()
         interface->setBounds(leftMargin, currentHeight, getWidth()-leftMargin, interface->getHeight());
         currentHeight += interface->getHeight();
     }
+    
+    addSequenceButton->setBounds(leftMargin + 15, currentHeight, 150, 20);
     
 }
 
@@ -219,7 +318,16 @@ void OptoProtocolInterface::buttonClicked(Button* button)
 {
     if (button == addSequenceButton.get())
     {
-        // add new sequence
+        LOGD("Add sequence button clicked");
+        
+        Sequence* defaultSequence = new Sequence(this);
+        
+        protocol->sequences.add(defaultSequence);
+        int numSequences = protocol->sequences.size();
+        sequenceInterfaces.add(new OptoSequenceInterface("Sequence " + String(numSequences), defaultSequence, this));
+        addAndMakeVisible(sequenceInterfaces.getLast());
+       
+        updateBounds(sequenceInterfaces.getLast()->getHeight());
     }
 }
 
@@ -247,10 +355,10 @@ OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     addAndMakeVisible(viewport.get());
     
     // Create the content component
-    protocolInterfaces.add(new OptoProtocolInterface("Optotagging 1"));
+    protocolInterfaces.add(new OptoProtocolInterface("Optotagging 1", viewport.get()));
     
     // Set an initial size for the content component
-    protocolInterfaces[0]->setSize(getWidth(), 800); // Initial height, will be adjusted in resized()
+    protocolInterfaces.getLast()->setSize(getWidth(), 800); // Initial height, will be adjusted in resized()
     
     // Set the content component as the viewport's viewed component
     viewport->setViewedComponent(protocolInterfaces[0], false);
@@ -331,4 +439,5 @@ void OptoProtocolCanvas::paint(Graphics& g)
 
     g.setColour(findColour(ThemeColours::defaultText));
     g.drawLine(10, 64, (float)getWidth() - 30, 64, 1.0f);
+    
 }
