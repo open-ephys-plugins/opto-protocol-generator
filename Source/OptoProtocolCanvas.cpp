@@ -158,6 +158,8 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
     addStimulusButton->addListener(this);
     addAndMakeVisible(addStimulusButton.get());
     
+    sequence->conditions.add(new Condition(parent, sequence));
+    
     Array<String> availableSources = {"Probe A", "Probe B"};
     Array<int> sitesPerSource = {14, 14};
     Array<int> availableWavelengths = {450, 538};
@@ -165,9 +167,10 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
     PulseTrain* pulseTrain = new PulseTrain(parent, 
                                             availableSources,
                                             sitesPerSource,
-                                            availableWavelengths);
+                                            availableWavelengths,
+                                            sequence->conditions.getLast());
     
-    sequence->conditions.add(new Condition(parent));
+    
     sequence->conditions.getLast()->stimuli.add(pulseTrain);
     
     stimulusInterfaces.add(new PulseTrainInterface(pulseTrain, parent));
@@ -233,12 +236,14 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         Array<int> sitesPerSource = {14, 14};
         Array<int> availableWavelengths = {450, 538};
         
+        sequence->conditions.add(new Condition(parent, sequence));
+        
         PulseTrain* pulseTrain = new PulseTrain(parent,
                                                 availableSources,
                                                 sitesPerSource,
-                                                availableWavelengths);
+                                                availableWavelengths,
+                                                sequence->conditions.getLast());
         
-        sequence->conditions.add(new Condition(parent));
         sequence->conditions.getLast()->stimuli.add(pulseTrain);
         
         stimulusInterfaces.add(new PulseTrainInterface(pulseTrain, parent));
@@ -257,7 +262,7 @@ OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewp
 
     protocol = std::make_unique<Protocol>(name, this);
     
-    Sequence* defaultSequence = new Sequence(this);
+    Sequence* defaultSequence = new Sequence(this, protocol.get());
     
     protocol->sequences.add(defaultSequence);
     sequenceInterfaces.add(new OptoSequenceInterface("Sequence 1", defaultSequence, this));
@@ -320,7 +325,7 @@ void OptoProtocolInterface::buttonClicked(Button* button)
     {
         LOGD("Add sequence button clicked");
         
-        Sequence* defaultSequence = new Sequence(this);
+        Sequence* defaultSequence = new Sequence(this, protocol.get());
         
         protocol->sequences.add(defaultSequence);
         int numSequences = protocol->sequences.size();

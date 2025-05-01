@@ -23,15 +23,20 @@
 
 #include "Protocol.h"
 
+int Protocol::numProtocolsCreated = 0;
+int Sequence::numSequencesCreated = 0;
+int Condition::numConditionsCreated = 0;
+int Stimulus::numStimuliCreated = 0;
 
 PulseTrain::PulseTrain(ParameterOwner* owner_,
                        Array<String> availableSources,
                        Array<int> sitesPerSource,
-                       Array<int> availableWavelengths)
+                       Array<int> availableWavelengths,
+                       const Condition* condition_)
     : Stimulus(owner_, StimulusType::PULSE_TRAIN,
                availableSources,
                sitesPerSource,
-               availableWavelengths),
+               availableWavelengths, condition_),
       pulse_width(owner_, Parameter::VISUALIZER_SCOPE,
                  "pulse_width",
                  "Pulse width",
@@ -64,13 +69,13 @@ PulseTrain::PulseTrain(ParameterOwner* owner_,
                0,
                10000)
 {
-    pulse_count.setKey("pulse_count");
+    pulse_count.setKey(generateParameterKey("pulse_count"));
     Parameter::registerParameter(&pulse_count);
-    pulse_width.setKey("pulse_width");
+    pulse_width.setKey(generateParameterKey("pulse_width"));
     Parameter::registerParameter(&pulse_width);
-    pulse_frequency.setKey("pulse_frequency");
+    pulse_frequency.setKey(generateParameterKey("pulse_frequency"));
     Parameter::registerParameter(&pulse_frequency);
-    pulse_power.setKey("pulse_power");
+    pulse_power.setKey(generateParameterKey("pulse_power"));
     Parameter::registerParameter(&pulse_power);
 }
 
@@ -78,9 +83,12 @@ Stimulus::Stimulus(ParameterOwner* owner_,
                    StimulusType type_,
                    Array<String> availableSources,
                    Array<int> sitesPerSource_,
-                   Array<int> availableWavelengths_)
+                   Array<int> availableWavelengths_,
+                   const Condition* condition_)
     : owner(owner_),
       type(type_),
+      condition(condition_),
+      index(++numStimuliCreated),
       sitesPerSource(sitesPerSource_),
       availableWavelengths(availableWavelengths_),
       source(owner_,
@@ -105,11 +113,10 @@ Stimulus::Stimulus(ParameterOwner* owner_,
         defaultSelection);
     sites->setChannelCount(sitesPerSource[0]);
 
-    sites->setKey("sites");
+    sites->setKey(generateParameterKey("sites"));
     Parameter::registerParameter(sites.get());
-    source.setKey("source");
+    source.setKey(generateParameterKey("source"));
     Parameter::registerParameter(&source);
-
 
     LOGD("Sites per source: ", sitesPerSource_[0]);
 }
@@ -119,9 +126,19 @@ Stimulus::~Stimulus()
     // No dynamic memory to deallocate
 }
 
+std::string Stimulus::generateParameterKey(const String &name)
+{
+    return (String(condition->sequence->protocol->index) +
+            ":" + String(condition->sequence->index) +
+            ":" + String(condition->index) +
+            ":" + String(index) +
+            ":" + name).toStdString();
+}
 
-Condition::Condition(ParameterOwner* owner_)
+Condition::Condition(ParameterOwner* owner_, const Sequence* sequence_)
     : owner(owner_),
+      sequence(sequence_),
+      index(++numConditionsCreated),
       num_repeats(owner_,
                   Parameter::VISUALIZER_SCOPE,
                   "num_repeats",
@@ -130,7 +147,7 @@ Condition::Condition(ParameterOwner* owner_)
                   1, 1, 1000)
 {
     // Initialize with no stimuli
-    num_repeats.setKey("num_repeats");
+    num_repeats.setKey((String(sequence->protocol->index) + ":" + String(sequence->index) + ":" + String(index) + ":num_repeats").toStdString());
     Parameter::registerParameter(&num_repeats);
 }
 
@@ -139,8 +156,10 @@ Condition::~Condition()
     // OwnedArray will automatically delete all stimuli
 }
 
-Sequence::Sequence(ParameterOwner* owner_)
+Sequence::Sequence(ParameterOwner* owner_, const Protocol* protocol_)
     : owner(owner_),
+      index(++numSequencesCreated),
+      protocol(protocol_),
       baseline_interval(owner_,
                         Parameter::VISUALIZER_SCOPE,
                         "baseline_interval",
@@ -176,13 +195,13 @@ Sequence::Sequence(ParameterOwner* owner_)
             true)
 
 {
-    min_iti.setKey("min_iti");
+    min_iti.setKey((String(protocol->index) + ":" + String(index) + ":min_iti").toStdString());
     Parameter::registerParameter(&min_iti);
-    max_iti.setKey("max_iti");
+    max_iti.setKey((String(protocol->index) + ":" + String(index) + ":max_iti").toStdString());
     Parameter::registerParameter(&max_iti);
-    randomize.setKey("randomize");
+    randomize.setKey((String(protocol->index) + ":" + String(index) + ":randomize").toStdString());
     Parameter::registerParameter(&randomize);
-    baseline_interval.setKey("baseline_interval");
+    baseline_interval.setKey((String(protocol->index) + ":" + String(index) + ":baseline_interval").toStdString());
     Parameter::registerParameter(&baseline_interval);
 
 }
@@ -194,9 +213,8 @@ Sequence::~Sequence()
 
 
 Protocol::Protocol(const String& name_, ParameterOwner* owner_)
-    : name(name_), owner(owner_)
+    : name(name_), owner(owner_), index(++numProtocolsCreated)
 {
-    // Initialize with no sequences
 }
 
 Protocol::~Protocol()

@@ -27,6 +27,11 @@
 
 #include <ProcessorHeaders.h>
 
+class Protocol;
+class Sequence;
+class Condition;
+class Stimulus;
+
 /** Available stimulus types*/
 enum StimulusType
 {
@@ -49,7 +54,8 @@ public:
 	Stimulus(ParameterOwner* owner_, StimulusType type_,
              Array<String> availableSources,
              Array<int> sitesPerSource,
-             Array<int> availableWavelengths);
+             Array<int> availableWavelengths,
+             const Condition* condition);
 
 	/** The class destructor, used to deallocate memory*/
 	~Stimulus();
@@ -66,7 +72,20 @@ public:
     /** Available sites for each source */
     Array<int> sitesPerSource;
     
+    /** Index of the current stimulus */
+    static int numStimuliCreated;
+    
+    /** Stimulus index */
+    const int index;
+    
+    /** The Condition this stimulus belongs to */
+    const Condition* condition;
+    
 protected:
+    
+    /** Generate a unique parameter key */
+    std::string generateParameterKey(const String& name);
+
     /** The parameter owner */
     ParameterOwner* owner;
     
@@ -83,7 +102,8 @@ public:
     PulseTrain(ParameterOwner* owner_,
              Array<String> availableSources,
              Array<int> sitesPerSource,
-             Array<int> availableWavelengths);
+             Array<int> availableWavelengths,
+             const Condition* condition);
 
     /** The class destructor, used to deallocate memory*/
     ~PulseTrain();
@@ -112,7 +132,7 @@ class Condition
 {
 public:
 	/** The class constructor, used to initialize any members.*/
-	Condition(ParameterOwner* owner_);
+	Condition(ParameterOwner* owner_, const Sequence* sequence_);
 
 	/** The class destructor, used to deallocate memory*/
 	~Condition();
@@ -123,7 +143,17 @@ public:
     /** Holds the conditions for this sequence */
     OwnedArray<Stimulus> stimuli;
     
+    /** Index of the current condition */
+    static int numConditionsCreated;
+    
+    /** Condition index */
+    const int index;
+    
+    /** The Sequence this condition belongs to */
+    const Sequence* sequence;
+    
 private:
+    
     /** The parameter owner */
     ParameterOwner* owner;
 };
@@ -140,7 +170,7 @@ class Sequence
 {
 public:
 	/** The class constructor, used to initialize any members.*/
-	Sequence(ParameterOwner* owner_);
+	Sequence(ParameterOwner* owner_, const Protocol* protocol_);
 
 	/** The class destructor, used to deallocate memory*/
 	~Sequence();
@@ -160,9 +190,19 @@ public:
     /** Holds the conditions for this sequence */
     OwnedArray<Condition> conditions;
     
+    /** Index of the current protocol */
+    static int numSequencesCreated;
+    
+    /** Sequence  index */
+    const int index;
+    
+    /** The protocol this sequence belongs to */
+    const Protocol* protocol;
+    
 private:
     /** The parameter owner */
     ParameterOwner* owner;
+    
 };
 
 /** 
@@ -190,9 +230,16 @@ public:
     /** Holds the sequences for this protocol */
     OwnedArray<Sequence> sequences;
     
+    /** Index of the current protocol */
+    static int numProtocolsCreated;
+    
+    /** Protocol index */
+    const int index;
+    
 private:
     /** The parameter owner */
     ParameterOwner* owner;
+    
 };
 
 #endif // PROTOCOL_H_DEFINED
