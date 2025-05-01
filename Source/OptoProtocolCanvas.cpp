@@ -315,7 +315,8 @@ void OptoProtocolInterface::paint(Graphics& g)
 {
     // Draw the background
     g.fillAll(findColour(ThemeColours::componentBackground));
-    
+
+
 }
 
 
@@ -349,6 +350,46 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
     
 }
 
+void ProtocolTimeline::paint(Graphics& g)
+{
+    g.setColour(findColour(ThemeColours::defaultText));
+    g.drawText(getTimeString(elapsedTime), 0, 0, 50, 20, Justification::centredLeft);
+    g.drawText(getTimeString(totalTime),getWidth()-50, 0, 50, 20, Justification::centredRight);
+    
+    g.setColour(findColour(ThemeColours::menuHighlightBackground));
+    g.drawLine(45,10,getWidth()-45,10, 2.0f);
+}
+
+String ProtocolTimeline::getTimeString(float time)
+{
+    return "00:00";
+    
+}
+ 
+void ProtocolTimeline::setTotalTime(float timeInSeconds)
+{
+     totalTime = timeInSeconds;
+     repaint();
+}
+ 
+void ProtocolTimeline::setElapsedTime(float timeInSeconds)
+{
+     elapsedTime = timeInSeconds;
+     repaint();
+}
+ 
+void ProtocolTimeline::setTotalTrials(int numTrials)
+{
+     totalTrials = numTrials;
+     repaint();
+}
+ 
+void ProtocolTimeline::setElapsedTrials(int numTrials)
+{
+     elapsedTrials = numTrials;
+     repaint();
+}
+
 
 OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     : processor(processor_)
@@ -379,6 +420,9 @@ OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     protocolLabel->setJustificationType(Justification::centredLeft);
     addAndMakeVisible(protocolLabel.get());
     
+    protocolTimeline = std::make_unique<ProtocolTimeline>();
+    addAndMakeVisible(protocolTimeline.get());
+    
     runButton = std::make_unique<TextButton>("runButton");
     runButton->setButtonText("Run");
     runButton->addListener(this);
@@ -403,7 +447,8 @@ void OptoProtocolCanvas::resized()
 
     protocolSelector->setBounds(margin, margin*2, controlWidth, controlHeight);
     protocolLabel->setBounds(margin*2 + controlWidth-5, margin*2, labelWidth, controlHeight);
-    runButton->setBounds(margin*3 + controlWidth + labelWidth, margin*2, 100, controlHeight);
+    protocolTimeline->setBounds(margin*3 + controlWidth + 60, margin*2+2, 230, controlHeight);
+    runButton->setBounds(margin*4 + controlWidth + 190 + 110, margin*2, 100, controlHeight);
 
      // Set the viewport below the header
      viewport->setBounds(0, headerHeight, getWidth(), getHeight()-headerHeight);

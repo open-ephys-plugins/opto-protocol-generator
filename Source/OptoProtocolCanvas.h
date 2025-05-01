@@ -211,8 +211,49 @@ private:
 };
 
 /**
+* Shows a timeline for the currently selected protocol
+*/
+class ProtocolTimeline : public Component
+{
+public:
+
+    /** Constructor */
+    ProtocolTimeline() { }
+    
+    /** Destructor */
+    ~ProtocolTimeline() { }
+    
+   /** Draws the content background */
+   void paint(Graphics& g) override;
+    
+    /** Sets the total time */
+    void setTotalTime(float timeInSeconds);
+    
+    /** Sets the elapsed time */
+    void setElapsedTime(float timeInSeconds);
+    
+    /** Sets the total number of trials */
+    void setTotalTrials(int numTrials);
+    
+    /** Sets the elapsed number of trials */
+    void setElapsedTrials(int numTrials);
+    
+private:
+    
+    /** Convert seconds to string */
+    String getTimeString(float time);
+    
+    float totalTime = 0;
+    float elapsedTime = 0;
+    int totalTrials = 0;
+    int elapsedTrials = 0;
+
+};
+
+/**
 * 
 	Holds a drop-down menu for selecting protocols,
+    a timeline for the currently selected protocol,
     plus a viewport for scrolling through the protocol
     intefaces.
 
@@ -254,6 +295,9 @@ private:
 
     /** ComboBox for selecting a protocol */
     std::unique_ptr<ComboBox> protocolSelector;
+    
+    /** Timeline for the current protocol */
+    std::unique_ptr<ProtocolTimeline> protocolTimeline;
     
     /** Button for running a protocol */
     std::unique_ptr<TextButton> runButton;
