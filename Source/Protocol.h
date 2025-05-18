@@ -52,25 +52,13 @@ class Stimulus
 public:
 	/** The class constructor, used to initialize any members.*/
 	Stimulus(ParameterOwner* owner_, StimulusType type_,
-             Array<String> availableSources,
-             Array<int> sitesPerSource,
-             Array<int> availableWavelengths,
-             const Condition* condition);
+             Condition* condition);
 
 	/** The class destructor, used to deallocate memory*/
-	~Stimulus();
+	virtual ~Stimulus();
 
-    /** The name of the stimulation source (e.g. laser) */
-    CategoricalParameter source;
-
-    /** Stimulation sites (if the source has multiple emission sites) */
-    std::unique_ptr<SelectedChannelsParameter> sites;
-
-    /** Stimulus colours (in nm) */
-    Array<int> availableWavelengths;
-    
-    /** Available sites for each source */
-    Array<int> sitesPerSource;
+    /** Returns the total time of the stimulus */
+    virtual float getTotalTime() = 0;
     
     /** Index of the current stimulus */
     static int numStimuliCreated;
@@ -79,7 +67,10 @@ public:
     const int index;
     
     /** The Condition this stimulus belongs to */
-    const Condition* condition;
+    Condition* condition;
+
+    /** Stimulus type*/
+    StimulusType type;
     
 protected:
     
@@ -89,9 +80,6 @@ protected:
     /** The parameter owner */
     ParameterOwner* owner;
     
-    /** Stimulus type*/
-    StimulusType type;
-    
 };
 
 /** Pulse train stimulus */
@@ -100,25 +88,26 @@ class PulseTrain : public Stimulus
 public:
     /** The class constructor, used to initialize any members.*/
     PulseTrain(ParameterOwner* owner_,
-             Array<String> availableSources,
-             Array<int> sitesPerSource,
-             Array<int> availableWavelengths,
-             const Condition* condition);
+             Condition* condition);
 
     /** The class destructor, used to deallocate memory*/
     ~PulseTrain();
+
+    /** The total time of the stimulus */
+    float getTotalTime() override;
     
     /** Pulse width (ms) */
     FloatParameter pulse_width;
     
     /** Pulse frequency (Hz)*/
     FloatParameter pulse_frequency;
+
+    /** Pulse ramp (ms)*/
+    FloatParameter ramp_duration;
     
     /** Pulse count*/
     IntParameter pulse_count;
-    
-    /** Pulse power (microwatts) */
-    FloatParameter pulse_power;
+
 };
 
 /** 
@@ -132,16 +121,44 @@ class Condition
 {
 public:
 	/** The class constructor, used to initialize any members.*/
-	Condition(ParameterOwner* owner_, const Sequence* sequence_);
+	Condition(ParameterOwner* owner_,
+        Array<String> availableSources,
+        Array<int> sitesPerSource,
+        Array<int> availableWavelengths,
+        Sequence* sequence_);
 
 	/** The class destructor, used to deallocate memory*/
 	~Condition();
+
+    /** Adds stimulus to this condition */
+    void addStimulus(Stimulus* stimulus);
+
+    /** Total time for this condition */
+    float getTotalTime();
+
+    /** Total number of trials for this condition */
+    int getTotalTrials();
 
     /** Number of repeats for this condition */
     IntParameter num_repeats;
 
     /** Holds the conditions for this sequence */
     OwnedArray<Stimulus> stimuli;
+
+    /** Stimulus colours (in nm) */
+    Array<int> availableWavelengths;
+    
+    /** Available sites for each source */
+    Array<int> sitesPerSource;
+
+    /** The name of the stimulation source (e.g. laser) */
+    CategoricalParameter source;
+
+    /** Pulse power (microwatts) */
+    FloatParameter pulse_power;
+
+    /** Stimulation sites (if the source has multiple emission sites) */
+    std::unique_ptr<SelectedChannelsParameter> sites;
     
     /** Index of the current condition */
     static int numConditionsCreated;
@@ -150,9 +167,18 @@ public:
     const int index;
     
     /** The Sequence this condition belongs to */
-    const Sequence* sequence;
+    Sequence* sequence;
+
+    /** Add a light wavelength */
+    void addWavelength(int wavelength);
+
+    /** Remove a light wavelength */
+    void removeWavelength(int wavelength);
     
 private:
+
+    /** Generate a unique parameter key */
+    std::string generateParameterKey(const String& name);
     
     /** The parameter owner */
     ParameterOwner* owner;
@@ -170,10 +196,25 @@ class Sequence
 {
 public:
 	/** The class constructor, used to initialize any members.*/
-	Sequence(ParameterOwner* owner_, const Protocol* protocol_);
+	Sequence(ParameterOwner* owner_, Protocol* protocol_);
 
 	/** The class destructor, used to deallocate memory*/
 	~Sequence();
+
+    /** Adds a condition to the sequence */
+    void addCondition(Condition* condition);
+
+    /** Returns the total time of this sequence */
+    float getTotalTime();
+
+    /** Returns the total number of trials */
+    int getTotalTrials();
+
+    /** Gets the duration for the next stimulus */
+    float getTrialDuration(int trialIndex);
+
+    /** Creates the trials */
+    void createTrials();
 
     /** Baseline interval in seconds (delay before start of stimulation) */
     FloatParameter baseline_interval;
@@ -193,17 +234,27 @@ public:
     /** Index of the current protocol */
     static int numSequencesCreated;
     
-    /** Sequence  index */
+    /** Sequence index */
     const int index;
     
     /** The protocol this sequence belongs to */
-    const Protocol* protocol;
+    Protocol* protocol;
     
 private:
     /** The parameter owner */
     ParameterOwner* owner;
+
+    /** ITI values */
+    Array<float> iti_values;
+
+    /** Stimuli */
+    Array<Stimulus*> stimuli;
+
+    /** Order */
+    Array<int> order;
     
 };
+
 
 /** 
 	Holds parameters for a specific optogenetic stimulation
@@ -215,7 +266,8 @@ private:
     or custom waveforms).)
 */
 
-class Protocol
+class Protocol : public Timer,
+                 public ActionBroadcaster
 {
 public:
 	/** The class constructor, used to initialize any members.*/
@@ -224,8 +276,32 @@ public:
 	/** The class destructor, used to deallocate memory*/
 	~Protocol();
 
+    /** Run protocol */
+    void run();
+
+    /** Pause protocol */
+    void pause();
+
+    /** Reset protocol */
+    void reset();
+
     /** The name of the protocol */
     String name;
+
+    /** The description of the protocol */
+    String description;
+
+    /** Adds a sequence to this protocol */
+    void addSequence(Sequence* sequence);
+
+     /** Updates the trial info for each sequence */
+    void createTrials();
+
+    /** Returns the total time of this protocol */
+    float getTotalTime();
+
+    /** Returns the total number of trials */
+    int getTotalTrials();
 
     /** Holds the sequences for this protocol */
     OwnedArray<Sequence> sequences;
@@ -237,8 +313,21 @@ public:
     const int index;
     
 private:
+
+    /** Timer callback */
+    void timerCallback() override;
+
     /** The parameter owner */
     ParameterOwner* owner;
+
+    /** Current sequence */
+    int currentSequenceIndex = 0;
+
+    /** Current trial */
+    int currentTrialIndex = 0;
+
+    /** Baseline interval */
+    bool baselineInterval = true;
     
 };
 

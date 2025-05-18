@@ -31,70 +31,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 class OptoProtocolGenerator;
 class OptoProtocolInterface;
 
-/** 
-  Interface for selecting stimulus colours
- */
 
-class ColourSelectorWidget : public Component,
-                       public Button::Listener
-{
-public:
-    /** Constructor */
-    ColourSelectorWidget(Stimulus* stimulus,
-                   OptoProtocolInterface* parent);
-    
-    /** Destructor */
-    ~ColourSelectorWidget() { }
-    
-    /** Respond to button clicks */
-    void buttonClicked(Button* button) override;
-    
-private:
-    /** Buttons */
-    std::unique_ptr<TextButton> redButton;
-    std::unique_ptr<TextButton> blueButton;
-    std::unique_ptr<Label> wavelengthLabel;
-    
-    Stimulus* stimulus;
-    OptoProtocolInterface* parent;
-};
-
-
-/**
-* Interface for editing an opto sequence
-*/
-class OptoStimulusInterface : public Component
-{
-public:
-
-    /** Constructor */
-    OptoStimulusInterface(Stimulus* stimulus,
-                          OptoProtocolInterface* parent);
-    
-    /** Destructor */
-    ~OptoStimulusInterface();
-    
-    /** Sets component layout */
-    void resized() override;
-    
-   /** Draws the content background */
-   void paint(Graphics& g) override;
-    
-protected:
-    
-    std::unique_ptr<ComboBoxParameterEditor> sourceEditor;
-    std::unique_ptr<SelectedChannelsParameterEditor> siteEditor;
-    std::unique_ptr<ColourSelectorWidget> colourSelectorWidget;
-    
-    Stimulus* stimulus;
-    OptoProtocolInterface* parent;
-
-};
 
 /**
 * Interface for editing a pulse train stimulus
 */
-class PulseTrainInterface : public OptoStimulusInterface
+class PulseTrainInterface : public Component
 {
 public:
 
@@ -108,19 +50,103 @@ public:
     /** Sets component layout */
     void resized() override;
 
+    /** Enables the PulseTrainInterface*/
+    void enable();
+    
+    /** Disables the PulseTrainInterface */
+    void disable();
     
 private:
-    
-    std::unique_ptr<Label> stimulusTypeLabel;
     
     std::unique_ptr<BoundedValueParameterEditor> pulseWidthEditor;
     std::unique_ptr<BoundedValueParameterEditor> pulseFrequencyEditor;
     std::unique_ptr<BoundedValueParameterEditor> pulseCountEditor;
-    std::unique_ptr<BoundedValueParameterEditor> pulsePowerEditor;
+    std::unique_ptr<BoundedValueParameterEditor> rampDurationEditor;
     
     PulseTrain* pulse_train;
+    OptoProtocolInterface* parent;
 
 };
+
+/**
+  Interface for selecting stimulus colours
+ */
+
+class ColourSelectorWidget : public Component,
+                       public Button::Listener
+{
+public:
+    /** Constructor */
+    ColourSelectorWidget(Condition* condition,
+                   OptoProtocolInterface* parent);
+    
+    /** Destructor */
+    ~ColourSelectorWidget() { }
+    
+    /** Respond to button clicks */
+    void buttonClicked(Button* button) override;
+    
+    /** Enables the colour selector widget */
+    void enable();
+    
+    /** Disables the colour selector widget */
+    void disable();
+    
+private:
+    /** Buttons */
+    std::unique_ptr<TextButton> redButton;
+    std::unique_ptr<TextButton> blueButton;
+    std::unique_ptr<Label> wavelengthLabel;
+    
+    Condition* condition;
+    OptoProtocolInterface* parent;
+};
+
+
+/**
+* Interface for editing an opto condition
+*/
+class OptoConditionInterface : public Component
+{
+public:
+
+    /** Constructor */
+    OptoConditionInterface(Condition* condition,
+                           Stimulus* stimulus,
+                          OptoProtocolInterface* parent);
+    
+    /** Destructor */
+    ~OptoConditionInterface();
+    
+    /** Sets component layout */
+    void resized() override;
+    
+    /** Enables the condition interface */
+    void enable();
+    
+    /** Disables the condition interface */
+    void disable();
+    
+   /** Draws the content background */
+   void paint(Graphics& g) override;
+    
+protected:
+    
+    std::unique_ptr<Label> stimulusTypeLabel;
+    
+    std::unique_ptr<ComboBoxParameterEditor> sourceEditor;
+    std::unique_ptr<SelectedChannelsParameterEditor> siteEditor;
+    std::unique_ptr<ColourSelectorWidget> colourSelectorWidget;
+    std::unique_ptr<BoundedValueParameterEditor> pulsePowerEditor;
+    std::unique_ptr<BoundedValueParameterEditor> numRepeatsEditor;
+    
+    std::unique_ptr<PulseTrainInterface> pulseTrainInterface;
+    Condition* condition;
+    Stimulus* stimulus;
+    OptoProtocolInterface* parent;
+
+};
+
 
 /**
 * Interface for editing an opto sequence
@@ -144,14 +170,20 @@ public:
    /** Draws the content background */
    void paint(Graphics& g) override;
     
+    /** Enables the sequence interface */
+    void enable();
+    
+    /** Disables the sequence interface */
+    void disable();
+    
     /** Button clicked*/
     void buttonClicked(Button* button) override;
     
 private:
     
-    OwnedArray<OptoStimulusInterface> stimulusInterfaces;
+    OwnedArray<OptoConditionInterface> conditionInterfaces;
     
-    std::unique_ptr<TextButton> addStimulusButton;
+    std::unique_ptr<TextButton> addConditionButton;
     std::unique_ptr<Label> sequenceNameLabel;
     
     std::unique_ptr<BoundedValueParameterEditor> baselineIntervalEditor;
@@ -162,11 +194,78 @@ private:
     Sequence* sequence;
     OptoProtocolInterface* parent;
     
-    const int stimInterfaceHeight = 146;
-    const int stimInterfaceWidth = 365;
+    const int conditionInterfaceHeight = 176;
+    const int conditionInterfaceWidth = 365;
 
 };
 
+
+/**
+* Shows a timeline for the currently selected protocol
+*/
+class ProtocolTimeline : public Component,
+                         public Timer,
+                         public ActionListener
+{
+public:
+
+    /** Constructor */
+    ProtocolTimeline() { }
+    
+    /** Destructor */
+    ~ProtocolTimeline() { }
+    
+   /** Draws the content background */
+   void paint(Graphics& g) override;
+    
+    /** Starts the timeline */
+    void start();
+
+    /** Pauses the timeline*/
+    void pause();
+    
+    /** Resets the timeline */
+    void reset();
+    
+    /** Sets the total time */
+    void setTotalTime(float timeInSeconds);
+    
+    /** Sets the elapsed time */
+    void setElapsedTime(float timeInSeconds);
+    
+    /** Sets the total number of trials */
+    void setTotalTrials(int numTrials);
+    
+    /** Sets the current  trial number */
+    void setCurrentTrial(int trialNumber);
+    
+    /** Receives a trial update notification */
+    void actionListenerCallback(const String& message) override;
+    
+    /** Tracks state of the timeline */
+    bool isRunning = false;
+    
+    /** Tracks the paused state */
+    bool isPaused = false;
+    
+private:
+    
+    /** Timer callback */
+    void timerCallback() override;
+    
+    /** Convert seconds to string */
+    String getTimeString(float timeInSeconds);
+    
+    float totalTime = 5;
+    float elapsedTime = 0;
+    int totalTrials = 20;
+    int currentTrial = 0;
+    
+    int64 startTime = 0;
+    int64 pauseStart = 0;
+    int64 pauseTime = 0;
+
+};
 
 /**
 * Interface for editing an opto protocol
@@ -189,14 +288,29 @@ public:
     /** Changes bounds to fit sequence interfaces */
     void updateBounds(int expandBy = 0);
     
-   /** Draws the content background */
-   void paint(Graphics& g) override;
+    /** Draws the content background */
+    void paint(Graphics& g) override;
     
     /** Responds to button click*/
     void buttonClicked(Button* button) override;
     
+    /** Enables editing the interface */
+    void enable();
+    
+    /** Disabled editing the interface */
+    void disable();
+    
     /** Responds to parameter changes */
     void parameterChangeRequest(Parameter* parameter) override;
+    
+    /** Get pointer to the owned protocol */
+    Protocol* getProtocol() { return protocol.get(); }
+    
+    /** Sets the timeline for the protocol */
+    void setTimeline(ProtocolTimeline* timeline);
+    
+    /** Pointer to protocol timeline */
+    ProtocolTimeline* timeline = nullptr;
     
 private:
     
@@ -206,49 +320,10 @@ private:
     
     std::unique_ptr<Protocol> protocol;
     
-    Viewport* viewport;
+    Viewport* viewport = nullptr;
 
 };
 
-/**
-* Shows a timeline for the currently selected protocol
-*/
-class ProtocolTimeline : public Component
-{
-public:
-
-    /** Constructor */
-    ProtocolTimeline() { }
-    
-    /** Destructor */
-    ~ProtocolTimeline() { }
-    
-   /** Draws the content background */
-   void paint(Graphics& g) override;
-    
-    /** Sets the total time */
-    void setTotalTime(float timeInSeconds);
-    
-    /** Sets the elapsed time */
-    void setElapsedTime(float timeInSeconds);
-    
-    /** Sets the total number of trials */
-    void setTotalTrials(int numTrials);
-    
-    /** Sets the elapsed number of trials */
-    void setElapsedTrials(int numTrials);
-    
-private:
-    
-    /** Convert seconds to string */
-    String getTimeString(float time);
-    
-    float totalTime = 0;
-    float elapsedTime = 0;
-    int totalTrials = 0;
-    int elapsedTrials = 0;
-
-};
 
 /**
 * 
@@ -260,7 +335,8 @@ private:
 */
 class OptoProtocolCanvas : public Visualizer,
                             public Button::Listener,
-                            public ComboBox::Listener
+                            public ComboBox::Listener,
+                            public ActionListener
 {
 public:
 
@@ -290,6 +366,9 @@ public:
 
     /** ComboBox selection callback */
     void comboBoxChanged(ComboBox* comboBox) override;
+    
+    /** Receives a trial update notification */
+    void actionListenerCallback(const String& message) override;
 
 private:
 
@@ -299,8 +378,17 @@ private:
     /** Timeline for the current protocol */
     std::unique_ptr<ProtocolTimeline> protocolTimeline;
     
+    /** Button for creating a new protocol */
+    std::unique_ptr<TextButton> newProtocolButton;
+    
+    /** Button for deleting a protocol */
+    std::unique_ptr<TextButton> deleteProtocolButton;
+    
     /** Button for running a protocol */
     std::unique_ptr<TextButton> runButton;
+    
+    /** Button for resetting a protocol */
+    std::unique_ptr<TextButton> resetButton;
 
     /** Label for the protocol combo */
     std::unique_ptr<Label> protocolLabel;
@@ -316,6 +404,9 @@ private:
 
 	/** Generates an assertion if this class leaks */
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolCanvas);
+    
+    /** Current protocol */
+    Protocol* currentProtocol;
 };
 
 
