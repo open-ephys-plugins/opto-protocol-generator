@@ -91,7 +91,7 @@ public:
              Condition* condition);
 
     /** The class destructor, used to deallocate memory*/
-    ~PulseTrain();
+    ~PulseTrain() { }
 
     /** The total time of the stimulus */
     float getTotalTime() override;
@@ -107,6 +107,58 @@ public:
     
     /** Pulse count*/
     IntParameter pulse_count;
+
+};
+
+
+/** Ramp stimulus */
+class RampStimulus : public Stimulus
+{
+public:
+    /** The class constructor, used to initialize any members.*/
+    RampStimulus(ParameterOwner* owner_,
+             Condition* condition);
+
+    /** The class destructor, used to deallocate memory*/
+    ~RampStimulus() { }
+
+    /** The total time of the stimulus */
+    float getTotalTime() override;
+    
+    /** Plateau duration (ms) */
+    FloatParameter plateau_duration;
+    
+    /** Onset duration (ms) */
+    FloatParameter ramp_onset_duration;
+
+    /** Offset duration (ms)*/
+    FloatParameter ramp_offset_duration;
+    
+    /** Ramp profile */
+    CategoricalParameter ramp_profile;
+
+};
+
+
+/** Sine wave stimulus */
+class SineWave : public Stimulus
+{
+public:
+    /** The class constructor, used to initialize any members.*/
+    SineWave(ParameterOwner* owner_,
+             Condition* condition);
+
+    /** The class destructor, used to deallocate memory*/
+    ~SineWave() { }
+
+    /** The total time of the stimulus */
+    float getTotalTime() override;
+    
+    /** Sine wave duration (ms) */
+    FloatParameter sine_wave_duration;
+    
+    /** Sine wave frequency */
+    FloatParameter sine_wave_frequency;
 
 };
 

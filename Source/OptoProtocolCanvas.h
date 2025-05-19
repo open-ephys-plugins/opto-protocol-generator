@@ -45,7 +45,7 @@ public:
                           OptoProtocolInterface* parent);
     
     /** Destructor */
-    ~PulseTrainInterface();
+    ~PulseTrainInterface() { }
     
     /** Sets component layout */
     void resized() override;
@@ -64,6 +64,77 @@ private:
     std::unique_ptr<BoundedValueParameterEditor> rampDurationEditor;
     
     PulseTrain* pulse_train;
+    OptoProtocolInterface* parent;
+
+};
+
+
+/**
+* Interface for editing a ramp stimulus
+*/
+class RampStimulusInterface : public Component
+{
+public:
+
+    /** Constructor */
+    RampStimulusInterface(RampStimulus* ramp_stimulus,
+                          OptoProtocolInterface* parent);
+    
+    /** Destructor */
+    ~RampStimulusInterface() { }
+    
+    /** Sets component layout */
+    void resized() override;
+
+    /** Enables the RampStimulusInterface*/
+    void enable();
+    
+    /** Disables the RampStimulusInterface */
+    void disable();
+    
+private:
+    
+    std::unique_ptr<BoundedValueParameterEditor> plateauDurationEditor;
+    std::unique_ptr<BoundedValueParameterEditor> onsetDurationEditor;
+    std::unique_ptr<BoundedValueParameterEditor> offsetDurationEditor;
+    std::unique_ptr<ComboBoxParameterEditor> profileEditor;
+    
+    RampStimulus* ramp_stimulus;
+    OptoProtocolInterface* parent;
+
+};
+
+
+
+/**
+* Interface for editing a sine wave stimulus
+*/
+class SineWaveInterface : public Component
+{
+public:
+
+    /** Constructor */
+    SineWaveInterface(SineWave* sine_wave,
+                          OptoProtocolInterface* parent);
+    
+    /** Destructor */
+    ~SineWaveInterface() { }
+    
+    /** Sets component layout */
+    void resized() override;
+
+    /** Enables the SineWaveInterface*/
+    void enable();
+    
+    /** Disables the SineWaveInterface */
+    void disable();
+    
+private:
+    
+    std::unique_ptr<BoundedValueParameterEditor> durationEditor;
+    std::unique_ptr<BoundedValueParameterEditor> frequencyEditor;
+    
+    SineWave* sine_wave;
     OptoProtocolInterface* parent;
 
 };
@@ -141,6 +212,9 @@ protected:
     std::unique_ptr<BoundedValueParameterEditor> numRepeatsEditor;
     
     std::unique_ptr<PulseTrainInterface> pulseTrainInterface;
+    std::unique_ptr<SineWaveInterface> sineWaveInterface;
+    std::unique_ptr<RampStimulusInterface> rampStimulusInterface;
+    
     Condition* condition;
     Stimulus* stimulus;
     OptoProtocolInterface* parent;

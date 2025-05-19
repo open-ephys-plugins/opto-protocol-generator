@@ -111,11 +111,6 @@ PulseTrainInterface::PulseTrainInterface(PulseTrain* pulse_train_,
     setBounds(0, 0, 0, 400);
 }
     
-
-PulseTrainInterface::~PulseTrainInterface()
-{
-    
-}
     
 void PulseTrainInterface::resized()
 {
@@ -126,7 +121,6 @@ void PulseTrainInterface::resized()
     rampDurationEditor->setBounds(0, 90, 150, 20);
     
 }
-
 
 void PulseTrainInterface::enable()
 {
@@ -143,6 +137,90 @@ void PulseTrainInterface::disable()
     pulseFrequencyEditor->parameterEnabled(false);
     pulseCountEditor->parameterEnabled(false);
     rampDurationEditor->parameterEnabled(false);
+
+}
+
+
+RampStimulusInterface::RampStimulusInterface(RampStimulus* ramp_stimulus_,
+                                             OptoProtocolInterface* parent_)
+    : ramp_stimulus(ramp_stimulus_), parent(parent_)
+{
+    
+    plateauDurationEditor = std::make_unique<BoundedValueParameterEditor>(&ramp_stimulus->plateau_duration);
+    addAndMakeVisible(plateauDurationEditor.get());
+    onsetDurationEditor = std::make_unique<BoundedValueParameterEditor>(&ramp_stimulus->ramp_onset_duration);
+    addAndMakeVisible(onsetDurationEditor.get());
+    offsetDurationEditor = std::make_unique<BoundedValueParameterEditor>(&ramp_stimulus->ramp_offset_duration);
+    addAndMakeVisible(offsetDurationEditor.get());
+    profileEditor = std::make_unique<ComboBoxParameterEditor>(&ramp_stimulus->ramp_profile);
+    addAndMakeVisible(profileEditor.get());
+    
+    setBounds(0, 0, 0, 400);
+}
+    
+    
+void RampStimulusInterface::resized()
+{
+    
+    plateauDurationEditor->setBounds(0, 0, 150, 20);
+    onsetDurationEditor->setBounds(0, 30, 150, 20);
+    offsetDurationEditor->setBounds(0, 60, 150, 20);
+    profileEditor->setBounds(0, 90, 150, 20);
+    
+}
+
+void RampStimulusInterface::enable()
+{
+    plateauDurationEditor->parameterEnabled(true);
+    onsetDurationEditor->parameterEnabled(true);
+    offsetDurationEditor->parameterEnabled(true);
+    profileEditor->parameterEnabled(true);
+
+}
+
+void RampStimulusInterface::disable()
+{
+    plateauDurationEditor->parameterEnabled(false);
+    onsetDurationEditor->parameterEnabled(false);
+    offsetDurationEditor->parameterEnabled(false);
+    profileEditor->parameterEnabled(false);
+
+}
+
+
+SineWaveInterface::SineWaveInterface(SineWave* sine_wave_,
+                                             OptoProtocolInterface* parent_)
+    : sine_wave(sine_wave_), parent(parent_)
+{
+    
+    durationEditor = std::make_unique<BoundedValueParameterEditor>(&sine_wave->sine_wave_duration);
+    addAndMakeVisible(durationEditor.get());
+    frequencyEditor = std::make_unique<BoundedValueParameterEditor>(&sine_wave->sine_wave_frequency);
+    addAndMakeVisible(frequencyEditor.get());
+    
+    setBounds(0, 0, 0, 400);
+}
+    
+    
+void SineWaveInterface::resized()
+{
+    
+    durationEditor->setBounds(0, 0, 150, 20);
+    frequencyEditor->setBounds(0, 30, 150, 20);
+    
+}
+
+void SineWaveInterface::enable()
+{
+    durationEditor->parameterEnabled(true);
+    frequencyEditor->parameterEnabled(true);
+
+}
+
+void SineWaveInterface::disable()
+{
+    durationEditor->parameterEnabled(false);
+    frequencyEditor->parameterEnabled(false);
 
 }
 
@@ -168,8 +246,14 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
         stimulusTypeLabel = std::make_unique<Label>("stimulusTypeLabel", "Pulse train");
         pulseTrainInterface = std::make_unique<PulseTrainInterface>((PulseTrain*) stimulus, parent);
         addAndMakeVisible(pulseTrainInterface.get());
-    } else {
-        stimulusTypeLabel = std::make_unique<Label>("stimulusTypeLabel", "Unknown");
+    } else if (stimulus->type == StimulusType::SINUSOID) {
+        stimulusTypeLabel = std::make_unique<Label>("stimulusTypeLabel", "Sine wave");
+        sineWaveInterface = std::make_unique<SineWaveInterface>((SineWave*) stimulus, parent);
+        addAndMakeVisible(sineWaveInterface.get());
+    } else if (stimulus->type == StimulusType::RAMP) {
+        stimulusTypeLabel = std::make_unique<Label>("stimulusTypeLabel", "Ramp");
+        rampStimulusInterface = std::make_unique<RampStimulusInterface>((RampStimulus*) stimulus, parent);
+        addAndMakeVisible(rampStimulusInterface.get());
     }
     
     stimulusTypeLabel->setFont(FontOptions ("Inter", "Regular", 17));
@@ -193,7 +277,16 @@ void OptoConditionInterface::resized()
     siteEditor->setBounds(15, 80, 150, 20);
     pulsePowerEditor->setBounds(15, 110, 150, 20);
     numRepeatsEditor->setBounds(15, 140, 150, 20);
-    pulseTrainInterface->setBounds(190, 55, getWidth()-190, getHeight()-55);
+    
+    if (pulseTrainInterface.get() != nullptr)
+        pulseTrainInterface->setBounds(190, 55, getWidth()-190, getHeight()-55);
+    
+    if (sineWaveInterface.get() != nullptr)
+        sineWaveInterface->setBounds(190, 55, getWidth()-190, getHeight()-55);
+    
+    if (rampStimulusInterface.get() != nullptr)
+        rampStimulusInterface->setBounds(190, 55, getWidth()-190, getHeight()-55);
+    
 }
 
 
@@ -205,7 +298,15 @@ void OptoConditionInterface::enable()
     numRepeatsEditor->parameterEnabled(true);
     
     colourSelectorWidget->enable();
-    pulseTrainInterface->enable();
+    
+    if (pulseTrainInterface.get() != nullptr)
+        pulseTrainInterface->enable();
+    
+    if (sineWaveInterface.get() != nullptr)
+        sineWaveInterface->enable();
+    
+    if (rampStimulusInterface.get() != nullptr)
+        rampStimulusInterface->enable();
 }
 
 void OptoConditionInterface::disable()
@@ -219,7 +320,15 @@ void OptoConditionInterface::disable()
     numRepeatsEditor->parameterEnabled(false);
     
     colourSelectorWidget->disable();
-    pulseTrainInterface->disable();
+    
+    if (pulseTrainInterface.get() != nullptr)
+        pulseTrainInterface->disable();
+    
+    if (sineWaveInterface.get() != nullptr)
+        sineWaveInterface->disable();
+    
+    if (rampStimulusInterface.get() != nullptr)
+        rampStimulusInterface->disable();
 }
     
 void OptoConditionInterface::paint(Graphics& g)
@@ -327,6 +436,8 @@ void OptoSequenceInterface::enable()
     {
         condition->enable();
     }
+    
+    addConditionButton->setEnabled(true);
 }
 
 void OptoSequenceInterface::disable()
@@ -343,6 +454,8 @@ void OptoSequenceInterface::disable()
     {
         condition->disable();
     }
+    
+    addConditionButton->setEnabled(false);
 }
 
 void OptoSequenceInterface::buttonClicked(Button* button)
@@ -363,12 +476,43 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         
         sequence->addCondition(condition);
         
-        PulseTrain* pulseTrain = new PulseTrain(parent,
-                                                condition);
+        PopupMenu m;
+        m.setLookAndFeel (&getLookAndFeel());
+
+        m.addItem (1, "Pulse Train", true);
+        m.addItem (2, "Sine Wave", true);
+        m.addItem (3, "Ramp", true);
         
-        condition->addStimulus(pulseTrain);
+        const int result = m.showMenu (PopupMenu::Options {}.withStandardItemHeight (20));
+
+        if (result == 1)
+        {
+            PulseTrain* pulseTrain = new PulseTrain(parent,
+                                                    condition);
+            
+            condition->addStimulus(pulseTrain);
+            
+            conditionInterfaces.add(new OptoConditionInterface(condition, pulseTrain, parent));
+            
+        } else if (result == 2)
+        {
+            SineWave* sineWave = new SineWave(parent,
+                                                    condition);
+            
+            condition->addStimulus(sineWave);
+            
+            conditionInterfaces.add(new OptoConditionInterface(condition, sineWave, parent));
+            
+        } else if (result == 3)
+        {
+            RampStimulus* rampStimulus = new RampStimulus(parent,
+                                                    condition);
+            
+            condition->addStimulus(rampStimulus);
+            
+            conditionInterfaces.add(new OptoConditionInterface(condition, rampStimulus, parent));
+        }
         
-        conditionInterfaces.add(new OptoConditionInterface(condition, pulseTrain, parent));
         addAndMakeVisible(conditionInterfaces.getLast());
         
         int numInterfaces =conditionInterfaces.size();
@@ -377,7 +521,7 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         
         parent->timeline->setTotalTime(sequence->protocol->getTotalTime());
         parent->timeline->setTotalTrials(sequence->protocol->getTotalTrials());
-        
+    
     }
 }
     
@@ -409,7 +553,7 @@ OptoProtocolInterface::~OptoProtocolInterface()
 
 void OptoProtocolInterface::updateBounds(int expandBy)
 {
-    int currentHeight = 60;
+    int currentHeight = 90;
     
     for (auto interface : sequenceInterfaces)
     {
@@ -504,6 +648,8 @@ void OptoProtocolInterface::enable()
     {
         sequence->enable();
     }
+    
+    addSequenceButton->setEnabled(true);
 }
 
 void OptoProtocolInterface::disable()
@@ -514,6 +660,8 @@ void OptoProtocolInterface::disable()
     {
         sequence->disable();
     }
+    
+    addSequenceButton->setEnabled(false);
 }
 
 

@@ -74,10 +74,6 @@ PulseTrain::PulseTrain(ParameterOwner* owner_,
 
 }
 
-PulseTrain::~PulseTrain()
-{
-}
-
 float PulseTrain::getTotalTime()
 {
     // Calculate the total time of the pulse train
@@ -89,6 +85,89 @@ float PulseTrain::getTotalTime()
     return (numPulses * pulseWidth) +
            (numPulses - 1) * (1.0f / pulseFrequency);
 
+}
+
+
+RampStimulus::RampStimulus(ParameterOwner* owner_,
+                       Condition* condition_)
+    : Stimulus(owner_, StimulusType::RAMP, condition_),
+      plateau_duration(owner_, Parameter::VISUALIZER_SCOPE,
+                 "plateau_duration",
+                 "Plateau",
+                 "The ramp plateau width in ms",
+                 "ms",
+                 100.0f,
+                 0.1f,
+                 1000.f),
+    ramp_onset_duration(owner_, Parameter::VISUALIZER_SCOPE,
+               "ramp_onset_duration",
+               "Onset",
+               "The ramp onset duration in ms",
+               "ms",
+               10.0f,
+               0.1f,
+               100.f),
+    ramp_offset_duration(owner_, Parameter::VISUALIZER_SCOPE,
+               "ramp_offset_duration",
+               "Offset",
+               "The ramp offset duration in ms",
+               "ms",
+               10.0f,
+               0.1f,
+               100.f),
+    ramp_profile(owner_, Parameter::VISUALIZER_SCOPE,
+                  "ramp_profile",
+                  "Ramp",
+                  "The ramp profile",
+                  {"Linear", "Cosine"},
+                  0)
+{
+    plateau_duration.setKey(generateParameterKey("plateau_duration"));
+    Parameter::registerParameter(&plateau_duration);
+    ramp_onset_duration.setKey(generateParameterKey("ramp_onset_duration"));
+    Parameter::registerParameter(&ramp_onset_duration);
+    ramp_offset_duration.setKey(generateParameterKey("ramp_offset_duration"));
+    Parameter::registerParameter(&ramp_offset_duration);
+    ramp_profile.setKey(generateParameterKey("ramp_profile"));
+    Parameter::registerParameter(&ramp_profile);
+
+}
+
+float RampStimulus::getTotalTime()
+{
+    return (plateau_duration.getFloatValue() + ramp_onset_duration.getFloatValue() + ramp_offset_duration.getFloatValue()) / 1000.0f;
+}
+
+
+SineWave::SineWave(ParameterOwner* owner_,
+                       Condition* condition_)
+    : Stimulus(owner_, StimulusType::SINUSOID, condition_),
+      sine_wave_duration(owner_, Parameter::VISUALIZER_SCOPE,
+                 "sine_wave_duration",
+                 "Duration",
+                 "The sine wave duration in ms",
+                 "ms",
+                 100.0f,
+                 0.1f,
+                 10000.f),
+    sine_wave_frequency(owner_, Parameter::VISUALIZER_SCOPE,
+               "sine_wave_frequency",
+               "Frequency",
+               "The sine wave frequency in Hz",
+               "Hz",
+               10.0f,
+               0.1f,
+               1000.f)
+{
+    sine_wave_duration.setKey(generateParameterKey("sine_wave_duration"));
+    Parameter::registerParameter(&sine_wave_duration);
+    sine_wave_frequency.setKey(generateParameterKey("sine_wave_frequency"));
+    Parameter::registerParameter(&sine_wave_frequency);
+}
+
+float SineWave::getTotalTime()
+{
+    return sine_wave_duration.getFloatValue() / 1000.0f;
 }
 
 Stimulus::Stimulus(ParameterOwner* owner_,
