@@ -82,6 +82,29 @@ protected:
     
 };
 
+/** Custom stimulus */
+class CustomStimulus : public Stimulus
+{
+public:
+    /** The class constructor, used to initialize any members.*/
+    CustomStimulus(ParameterOwner* owner_,
+             Condition* condition);
+
+    /** The class destructor, used to deallocate memory*/
+    ~CustomStimulus() { }
+
+    /** The total time of the stimulus */
+    float getTotalTime() override;
+    
+    /** Sample frequency (Hz) */
+    FloatParameter sample_frequency;
+    
+    /** Stimulus waveform*/
+    Array<float> stimulus_waveform;
+
+};
+
+
 /** Pulse train stimulus */
 class PulseTrain : public Stimulus
 {
@@ -184,6 +207,9 @@ public:
 
     /** Adds stimulus to this condition */
     void addStimulus(Stimulus* stimulus);
+    
+    /** Removes stimulus from this condition */
+    void removeStimulus(Stimulus* stimulus);
 
     /** Total time for this condition */
     float getTotalTime();
@@ -255,6 +281,9 @@ public:
 
     /** Adds a condition to the sequence */
     void addCondition(Condition* condition);
+    
+    /** Removes a condition from the sequence */
+    void removeCondition(Condition* condition);
 
     /** Returns the total time of this sequence */
     float getTotalTime();
@@ -345,6 +374,9 @@ public:
 
     /** Adds a sequence to this protocol */
     void addSequence(Sequence* sequence);
+    
+    /** Removes a sequence from this protocol */
+    void removeSequence(Sequence* sequence);
 
      /** Updates the trial info for each sequence */
     void createTrials();

@@ -28,6 +28,31 @@ int Sequence::numSequencesCreated = 0;
 int Condition::numConditionsCreated = 0;
 int Stimulus::numStimuliCreated = 0;
 
+
+CustomStimulus::CustomStimulus(ParameterOwner* owner_,
+                       Condition* condition_)
+    : Stimulus(owner_, StimulusType::CUSTOM, condition_),
+      sample_frequency(owner_, Parameter::VISUALIZER_SCOPE,
+                 "sample_frequency",
+                 "Sample frequency",
+                 "The waveform playback frequency",
+                 "Hz",
+                 10000.0f,
+                 100.0f,
+                 500000.f)
+{
+    sample_frequency.setKey(generateParameterKey("sample_frequency"));
+    Parameter::registerParameter(&sample_frequency);
+}
+
+float CustomStimulus::getTotalTime()
+{
+    // Calculate the total time of the pulse train
+    
+    return stimulus_waveform.size() / sample_frequency.getFloatValue();
+
+}
+
 PulseTrain::PulseTrain(ParameterOwner* owner_,
                        Condition* condition_)
     : Stimulus(owner_, StimulusType::PULSE_TRAIN, condition_),
@@ -268,6 +293,17 @@ void Condition::addStimulus(Stimulus* stimulus)
     sequence->createTrials();
 }
 
+void Condition::removeStimulus(Stimulus* stimulus)
+{
+    int stimulusIndex = stimuli.indexOf(stimulus);
+    if (stimulusIndex != -1)
+    {
+        stimuli.removeObject(stimulus, true);
+        sequence->createTrials();
+    }
+}
+    
+
 void Condition::addWavelength(int wavelength)
 {
     if (availableWavelengths.contains(wavelength))
@@ -379,6 +415,13 @@ void Sequence::addCondition(Condition* condition)
 {
     LOGD("Adding condition.");
     conditions.add(condition);
+    createTrials();
+}
+
+void Sequence::removeCondition(Condition* condition)
+{
+    LOGD("Removing condition.");
+    conditions.removeObject(condition, true);
     createTrials();
 }
 
@@ -510,6 +553,11 @@ void Protocol::reset()
 void Protocol::addSequence(Sequence* sequence)
 {
     sequences.add(sequence);
+}
+
+void Protocol::removeSequence(Sequence* sequence)
+{
+    sequences.removeObject(sequence, true);
 }
 
 void Protocol::timerCallback()

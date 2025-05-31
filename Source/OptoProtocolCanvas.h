@@ -32,6 +32,38 @@ class OptoProtocolGenerator;
 class OptoProtocolInterface;
 
 
+/**
+* Interface for editing a custom stimulus
+*/
+class CustomStimulusInterface : public Component
+{
+public:
+
+    /** Constructor */
+    CustomStimulusInterface(CustomStimulus* customStimulus,
+                          OptoProtocolInterface* parent);
+    
+    /** Destructor */
+    ~CustomStimulusInterface() { }
+    
+    /** Sets component layout */
+    void resized() override;
+
+    /** Enables the CustomStimulusInterface*/
+    void enable();
+    
+    /** Disables the CustomStimulusInterface */
+    void disable();
+    
+private:
+    
+    std::unique_ptr<BoundedValueParameterEditor> sampleFrequencyEditor;
+    
+    CustomStimulus* custom_stimulus;
+    OptoProtocolInterface* parent;
+
+};
+
 
 /**
 * Interface for editing a pulse train stimulus
@@ -173,6 +205,25 @@ private:
     OptoProtocolInterface* parent;
 };
 
+/** Remove condition button*/
+class RemoveConditionButton : public DrawableButton
+{
+public:
+    /** Constructor*/
+    RemoveConditionButton();
+    
+    /** Destructor */
+    ~RemoveConditionButton() { }
+        
+    /** Called when lookAndFeel changes*/
+    void colourChanged() override;
+    
+    /** Drawables*/
+    DrawablePath normalDrawable;
+    DrawablePath overDrawable;
+
+};
+
 
 /**
 * Interface for editing an opto condition
@@ -200,6 +251,14 @@ public:
     
    /** Draws the content background */
    void paint(Graphics& g) override;
+
+    /**
+     * Called when the delete button is pressed to request removal from parent
+     */
+    void requestDelete();
+    
+    /** Return the condition object for this interface*/
+    Condition* getCondition() { return condition; }
     
 protected:
     
@@ -214,6 +273,9 @@ protected:
     std::unique_ptr<PulseTrainInterface> pulseTrainInterface;
     std::unique_ptr<SineWaveInterface> sineWaveInterface;
     std::unique_ptr<RampStimulusInterface> rampStimulusInterface;
+    std::unique_ptr<CustomStimulusInterface> customStimulusInterface;
+    
+    std::unique_ptr<RemoveConditionButton> deleteButton; // DrawableButton to delete this condition
     
     Condition* condition;
     Stimulus* stimulus;
@@ -252,6 +314,9 @@ public:
     
     /** Button clicked*/
     void buttonClicked(Button* button) override;
+    
+    /** Removes a condition and its interface; returns true if interface was found */
+    bool removeCondition(OptoConditionInterface* conditionInterface);
     
 private:
     
@@ -385,6 +450,9 @@ public:
     
     /** Pointer to protocol timeline */
     ProtocolTimeline* timeline = nullptr;
+
+    /** Removes a condition interface */
+    void removeConditionInterface(OptoConditionInterface* conditionInterface);
     
 private:
     
@@ -400,8 +468,8 @@ private:
 
 
 /**
-* 
-	Holds a drop-down menu for selecting protocols,
+*
+    Holds a drop-down menu for selecting protocols,
     a timeline for the currently selected protocol,
     plus a viewport for scrolling through the protocol
     intefaces.
@@ -414,26 +482,26 @@ class OptoProtocolCanvas : public Visualizer,
 {
 public:
 
-	/** Constructor */
-	OptoProtocolCanvas(OptoProtocolGenerator* processor);
+    /** Constructor */
+    OptoProtocolCanvas(OptoProtocolGenerator* processor);
 
-	/** Destructor */
-	~OptoProtocolCanvas();
+    /** Destructor */
+    ~OptoProtocolCanvas();
 
-	/** Updates boundaries of sub-components whenever the canvas size changes */
-	void resized() override;
+    /** Updates boundaries of sub-components whenever the canvas size changes */
+    void resized() override;
     
     /** Called by the update() method to allow the visualizer to update its custom settings.*/
     void updateSettings() override;
 
-	/** Called when the visualizer's tab becomes visible again */
-	void refreshState() override;
+    /** Called when the visualizer's tab becomes visible again */
+    void refreshState() override;
 
-	/** Called instead of "repaint()" to avoid re-painting sub-components*/
-	void refresh() override;
+    /** Called instead of "repaint()" to avoid re-painting sub-components*/
+    void refresh() override;
 
-	/** Draws the canvas background */
-	void paint(Graphics& g) override;
+    /** Draws the canvas background */
+    void paint(Graphics& g) override;
 
     /** Button click callback */
     void buttonClicked(Button* button) override;
@@ -473,11 +541,11 @@ private:
     /** Interface for editing protocol parameters */
     OwnedArray<OptoProtocolInterface> protocolInterfaces;
 
-	/** Pointer to the processor class */
-	OptoProtocolGenerator* processor;
+    /** Pointer to the processor class */
+    OptoProtocolGenerator* processor;
 
-	/** Generates an assertion if this class leaks */
-	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolCanvas);
+    /** Generates an assertion if this class leaks */
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolCanvas);
     
     /** Current protocol */
     Protocol* currentProtocol;

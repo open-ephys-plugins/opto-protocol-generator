@@ -22,6 +22,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "OptoProtocolCanvas.h"
+#include <juce_gui_basics/juce_gui_basics.h>
+using namespace juce;
 
 ColourSelectorWidget::ColourSelectorWidget(Condition* condition_, OptoProtocolInterface* parent_)
     : condition(condition_), parent(parent_)
@@ -93,6 +95,37 @@ void ColourSelectorWidget::disable()
     wavelengthLabel->setEnabled(false);
 
 }
+
+CustomStimulusInterface::CustomStimulusInterface(CustomStimulus* custom_stimulus_,
+                                             OptoProtocolInterface* parent_)
+    : custom_stimulus(custom_stimulus_), parent(parent_)
+{
+    
+    sampleFrequencyEditor = std::make_unique<BoundedValueParameterEditor>(&custom_stimulus->sample_frequency);
+    addAndMakeVisible(sampleFrequencyEditor.get());
+    
+    setBounds(0, 0, 0, 400);
+}
+
+void CustomStimulusInterface::resized()
+{
+    
+    sampleFrequencyEditor->setBounds(0, 0, 150, 20);
+    
+}
+
+void CustomStimulusInterface::enable()
+{
+    sampleFrequencyEditor->parameterEnabled(true);
+
+}
+
+void CustomStimulusInterface::disable()
+{
+    sampleFrequencyEditor->parameterEnabled(false);
+
+}
+    
 
 PulseTrainInterface::PulseTrainInterface(PulseTrain* pulse_train_,
                                              OptoProtocolInterface* parent_)
@@ -224,6 +257,34 @@ void SineWaveInterface::disable()
 
 }
 
+RemoveConditionButton::RemoveConditionButton()
+    : DrawableButton("deleteButton", DrawableButton::ImageFitted)
+{
+    
+    Path xPath;
+    xPath.startNewSubPath(0, 0);
+    xPath.lineTo(10, 10);
+    xPath.startNewSubPath(10, 0);
+    xPath.lineTo(0, 10);
+    
+    normalDrawable.setPath(xPath);
+    normalDrawable.setStrokeFill(findColour(ThemeColours::defaultText).withAlpha(0.5f));
+    normalDrawable.setStrokeType(PathStrokeType(2.0f));
+    
+    overDrawable.setPath(xPath);
+    overDrawable.setStrokeFill(findColour(ThemeColours::defaultText).withAlpha(0.3f));
+    overDrawable.setStrokeType(PathStrokeType(2.0f));
+    
+    setImages(&normalDrawable, &overDrawable, nullptr, nullptr, nullptr);
+}
+
+void RemoveConditionButton::colourChanged()
+{
+    normalDrawable.setStrokeFill(findColour(ThemeColours::defaultText).withAlpha(0.5f));
+    overDrawable.setStrokeFill(findColour(ThemeColours::defaultText).withAlpha(0.3f));
+    
+    setImages(&normalDrawable, &overDrawable, nullptr, nullptr, nullptr);
+}
 
 OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* stimulus_,
                                              OptoProtocolInterface* parent_)
@@ -254,11 +315,21 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
         stimulusTypeLabel = std::make_unique<Label>("stimulusTypeLabel", "Ramp");
         rampStimulusInterface = std::make_unique<RampStimulusInterface>((RampStimulus*) stimulus, parent);
         addAndMakeVisible(rampStimulusInterface.get());
+    } else if (stimulus->type == StimulusType::CUSTOM) {
+        stimulusTypeLabel = std::make_unique<Label>("stimulusTypeLabel", "Custom");
+        customStimulusInterface = std::make_unique<CustomStimulusInterface>((CustomStimulus*) stimulus, parent);
+        addAndMakeVisible(customStimulusInterface.get());
     }
     
     stimulusTypeLabel->setFont(FontOptions ("Inter", "Regular", 17));
     stimulusTypeLabel->setJustificationType(Justification::centredLeft);
     addAndMakeVisible(stimulusTypeLabel.get());
+
+    // DrawableButton for delete (X)
+    deleteButton = std::make_unique<RemoveConditionButton>();
+    deleteButton->setTooltip("Delete this condition");
+    deleteButton->onClick = [this]() { requestDelete(); };
+    addAndMakeVisible(deleteButton.get());
     
     setBounds(0, 0, 0, 400);
 }
@@ -286,9 +357,18 @@ void OptoConditionInterface::resized()
     
     if (rampStimulusInterface.get() != nullptr)
         rampStimulusInterface->setBounds(190, 55, getWidth()-190, getHeight()-55);
+
+    // Place delete button in top-right corner
+    if (deleteButton)
+        deleteButton->setBounds(getWidth() - 20, 4, 16, 16);
     
 }
 
+void OptoConditionInterface::requestDelete()
+{
+    if (parent)
+        parent->removeConditionInterface(this);
+}
 
 void OptoConditionInterface::enable()
 {
@@ -408,20 +488,23 @@ void OptoSequenceInterface::resized()
     randomizeEditor->setBounds(leftMargin, 140, 150, 20);
     
     int currentHeight = 180;
-    
+    LOGD("OptoSequenceInterface::resized()");
+    LOGD("Starting height: ", currentHeight);
+    LOGD("Num condition interfaces: ", conditionInterfaces.size());
     for (auto interface : conditionInterfaces)
     {
         interface->setBounds(15, currentHeight, conditionInterfaceWidth, conditionInterfaceHeight);
         currentHeight += conditionInterfaceHeight + 10;
     }
-    
+    LOGD("New current height: ", currentHeight);
     addConditionButton->setBounds(265, currentHeight+6, 100, 20);
 }
     
 void OptoSequenceInterface::paint(Graphics& g)
 {
     g.setColour(findColour(ThemeColours::defaultText));
-    g.drawLine(93, 31, 365, 32, 1.0f);
+    g.drawLine(93, 31, 385, 31, 1.0f);
+    g.drawLine(15, getHeight()-5, 385, getHeight()-5, 1.0f);
 
 }
 
@@ -458,6 +541,25 @@ void OptoSequenceInterface::disable()
     addConditionButton->setEnabled(false);
 }
 
+bool OptoSequenceInterface::removeCondition(OptoConditionInterface* conditionInterface)
+{
+    if (conditionInterfaces.contains(conditionInterface))
+    {
+        LOGD("Removing condition interface.");
+        LOGD("Number of condition interfaces: ", conditionInterfaces.size());
+        sequence->removeCondition(conditionInterface->getCondition());
+        conditionInterfaces.removeObject(conditionInterface, true);
+        LOGD("New number of condition interfaces: ", conditionInterfaces.size());
+        int numInterfaces = conditionInterfaces.size();
+        setBounds(0,0,0,230 + (10 + conditionInterfaceHeight) * numInterfaces);
+        return true;
+    } else {
+        LOGD("Condition interface not found in this sequence.");
+        return false;
+    }
+    
+}
+
 void OptoSequenceInterface::buttonClicked(Button* button)
 {
     if (button == addConditionButton.get())
@@ -482,6 +584,7 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         m.addItem (1, "Pulse Train", true);
         m.addItem (2, "Sine Wave", true);
         m.addItem (3, "Ramp", true);
+        m.addItem (4, "Custom", true);
         
         const int result = m.showMenu (PopupMenu::Options {}.withStandardItemHeight (20));
 
@@ -511,13 +614,22 @@ void OptoSequenceInterface::buttonClicked(Button* button)
             condition->addStimulus(rampStimulus);
             
             conditionInterfaces.add(new OptoConditionInterface(condition, rampStimulus, parent));
+        } else if (result == 4)
+        {
+            CustomStimulus* customStimulus = new CustomStimulus(parent,
+                                                    condition);
+            
+            condition->addStimulus(customStimulus);
+            
+            conditionInterfaces.add(new OptoConditionInterface(condition, customStimulus, parent));
         }
         
         addAndMakeVisible(conditionInterfaces.getLast());
         
-        int numInterfaces =conditionInterfaces.size();
+        int numInterfaces = conditionInterfaces.size();
         setBounds(0,0,0,230 + (10 + conditionInterfaceHeight) * numInterfaces);
-        parent->updateBounds(conditionInterfaceHeight);
+        parent->resized();
+        parent->updateBounds(conditionInterfaceHeight-20);
         
         parent->timeline->setTotalTime(sequence->protocol->getTotalTime());
         parent->timeline->setTotalTrials(sequence->protocol->getTotalTrials());
@@ -562,7 +674,7 @@ void OptoProtocolInterface::updateBounds(int expandBy)
     
     int currentScrollDistance = viewport->getViewPositionY();
     setBounds(0, 0, getWidth(), currentHeight);
-    viewport->setViewPosition(0, currentScrollDistance + expandBy);
+    viewport->setViewPosition(0, currentScrollDistance);
 }
 
 void OptoProtocolInterface::resized()
@@ -577,7 +689,7 @@ void OptoProtocolInterface::resized()
         currentHeight += interface->getHeight();
     }
     
-    addSequenceButton->setBounds(leftMargin + 15, currentHeight, 150, 20);
+    addSequenceButton->setBounds(leftMargin + 15, currentHeight+5, 150, 20);
     
 }
 
@@ -610,6 +722,15 @@ void OptoProtocolInterface::buttonClicked(Button* button)
     }
 }
 
+void OptoProtocolInterface::removeConditionInterface(OptoConditionInterface* conditionInterface)
+{
+    for (auto seq : sequenceInterfaces)
+    {
+        seq->removeCondition(conditionInterface);
+    }
+    
+    resized();
+}
 
 void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
 {
@@ -669,7 +790,7 @@ void ProtocolTimeline::paint(Graphics& g)
 {
     g.setColour(findColour(ThemeColours::defaultText));
     g.drawText(getTimeString(elapsedTime), 0, 0, 50, 20, Justification::centredLeft);
-    g.drawText(getTimeString(totalTime),getWidth()-150, 0, 50, 20, Justification::centredRight);
+    g.drawText(getTimeString(totalTime-elapsedTime),getWidth()-150, 0, 50, 20, Justification::centredRight);
     
     if (currentTrial == 0)
     {
@@ -809,7 +930,7 @@ OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     protocolInterfaces.add(new OptoProtocolInterface("Optotagging 1", viewport.get()));
     
     // Set an initial size for the content component
-    protocolInterfaces.getLast()->setSize(getWidth(), 800); // Initial height, will be adjusted in resized()
+    protocolInterfaces.getLast()->setSize(getWidth(), 500); // Initial height, will be adjusted in resized()
     
     // Set the content component as the viewport's viewed component
     viewport->setViewedComponent(protocolInterfaces[0], false);
