@@ -22,8 +22,96 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "OptoProtocolCanvas.h"
+#include "OptoProtocolGenerator.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 using namespace juce;
+
+namespace
+{
+// Wave-player format (matches nidaq-test.py): sampleRate, maxVoltage, pulse/sine/custom with durations in source samples.
+static const double kSourceSampleRate = 30000.0;
+static const double kMaxVoltage = 5.0;
+
+static String sequenceToNidaqJson(Sequence* seq, double /*sampleRate*/ = 30000.0)
+{
+    DynamicObject::Ptr root = new DynamicObject();
+    root->setProperty("sampleRate", kSourceSampleRate);
+    root->setProperty("maxVoltage", kMaxVoltage);
+    root->setProperty("playImmediately", true);
+    root->setProperty("patternType", 0);
+
+    if (seq->conditions.size() == 0)
+        return JSON::toString(var(root.get()));
+
+    Condition* c = seq->conditions[0];
+    float power = jmin(1.0f, jmax(0.0f, c->pulse_power.getFloatValue() / 10000.0f));
+    float maxV = (float)(kMaxVoltage * power);
+    if (maxV < 0.01f) maxV = (float)kMaxVoltage;
+
+    bool hasPulse = false, hasSine = false, hasCustom = false;
+    for (Stimulus* s : c->stimuli)
+    {
+        if (s->type == PULSE_TRAIN && !hasPulse)
+        {
+            hasPulse = true;
+            PulseTrain* pt = static_cast<PulseTrain*>(s);
+            float pwMs = pt->pulse_width.getFloatValue();
+            float freqHz = pt->pulse_frequency.getFloatValue();
+            int onDuration = (int)(pwMs / 1000.0f * kSourceSampleRate);
+            if (onDuration < 1) onDuration = 1;
+            float periodSec = freqHz > 0 ? 1.0f / freqHz : 0.1f;
+            int periodSamples = (int)(periodSec * kSourceSampleRate);
+            int offDuration = periodSamples - onDuration;
+            if (offDuration < 1) offDuration = 1;
+
+            DynamicObject::Ptr pulse = new DynamicObject();
+            pulse->setProperty("analogOutputChannel", 0);
+            pulse->setProperty("onDuration", onDuration);
+            pulse->setProperty("offDuration", offDuration);
+            pulse->setProperty("delayDuration", 0);
+            pulse->setProperty("repeatNumber", pt->pulse_count.getIntValue());
+            pulse->setProperty("rampOnDuration", 0);
+            pulse->setProperty("rampOffDuration", (int)(pt->ramp_duration.getFloatValue() / 1000.0f * kSourceSampleRate));
+            pulse->setProperty("maxVoltage", maxV);
+            root->setProperty("pulse", var(pulse.get()));
+        }
+        else if (s->type == SINUSOID && !hasSine)
+        {
+            hasSine = true;
+            SineWave* sw = static_cast<SineWave*>(s);
+            float durMs = sw->sine_wave_duration.getFloatValue();
+            float freqHz = sw->sine_wave_frequency.getFloatValue();
+            int cycles = jmax(1, (int)(durMs / 1000.0f * freqHz + 0.5f));
+
+            DynamicObject::Ptr sine = new DynamicObject();
+            sine->setProperty("analogOutputChannel", 1);
+            sine->setProperty("frequency", (double)freqHz);
+            sine->setProperty("cycles", cycles);
+            sine->setProperty("delayDuration", 0);
+            sine->setProperty("maxVoltage", maxV);
+            root->setProperty("sine", var(sine.get()));
+        }
+        else if (s->type == CUSTOM && !hasCustom)
+        {
+            CustomStimulus* cs = static_cast<CustomStimulus*>(s);
+            if (cs->stimulus_waveform.size() == 0) continue;
+            hasCustom = true;
+            String str;
+            for (int i = 0; i < cs->stimulus_waveform.size(); i++)
+            {
+                if (i > 0) str << ",";
+                float v = jmax(0.0f, jmin(1.0f, cs->stimulus_waveform[i])) * power * (float)kMaxVoltage;
+                str << v;
+            }
+            DynamicObject::Ptr custom = new DynamicObject();
+            custom->setProperty("analogOutputChannel", 1);
+            custom->setProperty("string", str);
+            root->setProperty("custom", var(custom.get()));
+        }
+    }
+    return JSON::toString(var(root.get()));
+}
+}
 
 ColourSelectorWidget::ColourSelectorWidget(Condition* condition_, OptoProtocolInterface* parent_)
     : condition(condition_), parent(parent_)
@@ -1042,6 +1130,13 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
     {
         if (!protocolTimeline->isRunning)
         {
+            if (currentProtocol->sequences.size() > 0)
+            {
+                Sequence* seq1 = currentProtocol->sequences[0];
+                String json = sequenceToNidaqJson(seq1);
+                LOGC("NIDAQ config: ", json);
+                processor->sendConfigToNidaqOutput(json);
+            }
             protocolTimeline->start();
             currentProtocol->run();
             button->setButtonText("Pause");

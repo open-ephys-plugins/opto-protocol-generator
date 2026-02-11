@@ -62,6 +62,9 @@ public:
     /** Process function (not used)  */
     void process (AudioBuffer<float>& continuousBuffer) override {}
 
+    /** Sends config JSON to the NIDAQ Output processor if present in the signal chain. */
+    void sendConfigToNidaqOutput(const String& json);
+
 private:
 
 	/** Generates an assertion if this class leaks */
