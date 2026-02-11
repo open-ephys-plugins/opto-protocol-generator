@@ -524,6 +524,10 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
     addConditionButton->addListener(this);
     addAndMakeVisible(addConditionButton.get());
     
+    deleteSequenceButton = std::make_unique<TextButton>("deleteSequenceButton");
+    deleteSequenceButton->setButtonText("Delete sequence");
+    deleteSequenceButton->addListener(this);
+    addAndMakeVisible(deleteSequenceButton.get());
     
     Array<String> availableSources = {"Probe A", "Probe B"};
     Array<int> sitesPerSource = {14, 14};
@@ -569,6 +573,8 @@ void OptoSequenceInterface::resized()
     int leftMargin = 15;
     
     sequenceNameLabel->setBounds(leftMargin-5, 20, 140, 20);
+    if (deleteSequenceButton)
+        deleteSequenceButton->setBounds(getWidth() - 120, 18, 105, 22);
     
     baselineIntervalEditor->setBounds(leftMargin, 50, 150, 20);
     minItiEditor->setBounds(leftMargin, 80, 150, 20);
@@ -609,6 +615,10 @@ void OptoSequenceInterface::enable()
     }
     
     addConditionButton->setEnabled(true);
+    if (deleteSequenceButton && parent != nullptr)
+        deleteSequenceButton->setVisible(parent->getNumSequenceInterfaces() > 1);
+    if (deleteSequenceButton)
+        deleteSequenceButton->setEnabled(true);
 }
 
 void OptoSequenceInterface::disable()
@@ -627,6 +637,8 @@ void OptoSequenceInterface::disable()
     }
     
     addConditionButton->setEnabled(false);
+    if (deleteSequenceButton)
+        deleteSequenceButton->setEnabled(false);
 }
 
 bool OptoSequenceInterface::removeCondition(OptoConditionInterface* conditionInterface)
@@ -650,6 +662,12 @@ bool OptoSequenceInterface::removeCondition(OptoConditionInterface* conditionInt
 
 void OptoSequenceInterface::buttonClicked(Button* button)
 {
+    if (button == deleteSequenceButton.get())
+    {
+        if (parent != nullptr)
+            parent->removeSequenceInterface(this);
+        return;
+    }
     if (button == addConditionButton.get())
     {
         // add stimulus
@@ -818,6 +836,23 @@ void OptoProtocolInterface::removeConditionInterface(OptoConditionInterface* con
     }
     
     resized();
+}
+
+void OptoProtocolInterface::removeSequenceInterface(OptoSequenceInterface* sequenceInterface)
+{
+    if (sequenceInterfaces.size() <= 1)
+        return;
+    if (!sequenceInterfaces.contains(sequenceInterface))
+        return;
+    Sequence* seq = sequenceInterface->getSequence();
+    sequenceInterfaces.removeObject(sequenceInterface, true);
+    protocol->removeSequence(seq);
+    timeline->setTotalTime(protocol->getTotalTime());
+    timeline->setTotalTrials(protocol->getTotalTrials());
+    updateBounds(0);
+    resized();
+    for (auto* si : sequenceInterfaces)
+        si->enable();
 }
 
 void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)

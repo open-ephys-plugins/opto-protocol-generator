@@ -318,11 +318,15 @@ public:
     /** Removes a condition and its interface; returns true if interface was found */
     bool removeCondition(OptoConditionInterface* conditionInterface);
     
+    /** Returns the Sequence this interface edits (for removal from protocol). */
+    Sequence* getSequence() { return sequence; }
+    
 private:
     
     OwnedArray<OptoConditionInterface> conditionInterfaces;
     
     std::unique_ptr<TextButton> addConditionButton;
+    std::unique_ptr<TextButton> deleteSequenceButton;
     std::unique_ptr<Label> sequenceNameLabel;
     
     std::unique_ptr<BoundedValueParameterEditor> baselineIntervalEditor;
@@ -453,6 +457,12 @@ public:
 
     /** Removes a condition interface */
     void removeConditionInterface(OptoConditionInterface* conditionInterface);
+    
+    /** Removes a sequence interface and the sequence from the protocol. Keeps at least one sequence. */
+    void removeSequenceInterface(OptoSequenceInterface* sequenceInterface);
+    
+    /** Number of sequence interfaces (for delete-button visibility). */
+    int getNumSequenceInterfaces() const { return sequenceInterfaces.size(); }
     
 private:
     

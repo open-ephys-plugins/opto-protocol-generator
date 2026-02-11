@@ -484,7 +484,11 @@ void Sequence::createTrials()
 
 float Sequence::getTrialDuration(int trialIndex)
 {
+    if (order.isEmpty() || trialIndex < 0 || trialIndex >= order.size())
+        return 0.0f;
     int nextTrial = order[trialIndex];
+    if (nextTrial < 0 || nextTrial >= stimuli.size() || nextTrial >= iti_values.size())
+        return 0.0f;
     return stimuli[nextTrial]->getTotalTime() + iti_values[nextTrial];
 }
 
@@ -525,6 +529,10 @@ Protocol::~Protocol()
 
 void Protocol::run()
 {
+    if (sequences.isEmpty())
+        return;
+    if (currentSequenceIndex >= sequences.size())
+        currentSequenceIndex = 0;
     if (baselineInterval)
     {
         float baselineInterval = sequences[currentSequenceIndex]->baseline_interval.getFloatValue();
@@ -563,6 +571,16 @@ void Protocol::removeSequence(Sequence* sequence)
 void Protocol::timerCallback()
 {
     stopTimer();
+    if (sequences.isEmpty())
+    {
+        sendActionMessage("FINISHED");
+        return;
+    }
+    if (currentSequenceIndex >= sequences.size())
+    {
+        sendActionMessage("FINISHED");
+        return;
+    }
 
     if (baselineInterval)
     {
@@ -578,14 +596,13 @@ void Protocol::timerCallback()
 
         if (currentSequenceIndex >= sequences.size())
         {
-            // All sequences are done
             sendActionMessage("FINISHED");
             return;
-        } else {
-            baselineInterval = true;
-            run();
         }
-    }   
+        baselineInterval = true;
+        run();
+        return;
+    }
 
     LOGD("Starting sequence ", currentSequenceIndex, " trial ", currentTrialIndex);
     float nextTrialDuration = sequences[currentSequenceIndex]->getTrialDuration(currentTrialIndex);
@@ -594,7 +611,6 @@ void Protocol::timerCallback()
     sendActionMessage(String(currentTrialIndex));
 
     startTimer(nextTrialDuration * 1000.0f);
-
 }
 
 void Protocol::createTrials()
