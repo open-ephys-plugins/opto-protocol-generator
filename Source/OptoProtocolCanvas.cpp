@@ -731,7 +731,7 @@ void OptoSequenceInterface::buttonClicked(Button* button)
     }
 }
 
-enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites, ColLightPower, ColBaseline, ColITI, ColRepeat };
+enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites, ColLightPower, ColBaseline, ColITI, ColStartTime, ColEndTime, ColRepeat };
 
 String ConditionsTableModel::getStructureSignature() const
 {
@@ -860,6 +860,84 @@ String ConditionsTableModel::getITIString(int seqIdx) const
     return minS + " - " + maxS;
 }
 
+static float formatTimeSec(float t) { return (int)(t * 100.0f + 0.5f) / 100.0f; }
+
+String ConditionsTableModel::getStartTimeString(int row) const
+{
+    if (!protocol || row < 0 || row >= rowOrder.size()) return {};
+    int seqIdx, condIdx, repeatIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx);
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    float timeBeforeSeq = 0;
+    for (int s = 0; s < seqIdx - 1; ++s)
+        timeBeforeSeq += protocol->sequences[s]->getTotalTime();
+    int pos = 0;
+    for (int r = 0; r < row; ++r)
+    {
+        int s, c, p;
+        rowToIndices(r, s, c, p);
+        if (s == seqIdx) ++pos;
+    }
+    float baseline = seq->baseline_interval.getFloatValue();
+    float avgITI = 0.5f * (seq->min_iti.getFloatValue() + seq->max_iti.getFloatValue());
+    float cumul = baseline;
+    int idx = 0;
+    for (int r = 0; r < rowOrder.size(); ++r)
+    {
+        int s, c, p;
+        rowToIndices(r, s, c, p);
+        if (s != seqIdx) continue;
+        Condition* cond = seq->conditions[c - 1];
+        int n = cond->sites->getArrayValue().size() * cond->availableWavelengths.size() * cond->stimuli.size();
+        float stimT = 0;
+        for (auto* st : cond->stimuli) stimT += st->getTotalTime();
+        float blockDur = (float)n * (stimT + avgITI);
+        if (idx == pos)
+            return String(formatTimeSec(timeBeforeSeq + cumul)) + "s";
+        cumul += blockDur;
+        ++idx;
+    }
+    return {};
+}
+
+String ConditionsTableModel::getEndTimeString(int row) const
+{
+    if (!protocol || row < 0 || row >= rowOrder.size()) return {};
+    int seqIdx, condIdx, repeatIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx);
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    float timeBeforeSeq = 0;
+    for (int s = 0; s < seqIdx - 1; ++s)
+        timeBeforeSeq += protocol->sequences[s]->getTotalTime();
+    int pos = 0;
+    for (int r = 0; r < row; ++r)
+    {
+        int s, c, p;
+        rowToIndices(r, s, c, p);
+        if (s == seqIdx) ++pos;
+    }
+    float baseline = seq->baseline_interval.getFloatValue();
+    float avgITI = 0.5f * (seq->min_iti.getFloatValue() + seq->max_iti.getFloatValue());
+    float cumul = baseline;
+    int idx = 0;
+    for (int r = 0; r < rowOrder.size(); ++r)
+    {
+        int s, c, p;
+        rowToIndices(r, s, c, p);
+        if (s != seqIdx) continue;
+        Condition* cond = seq->conditions[c - 1];
+        int n = cond->sites->getArrayValue().size() * cond->availableWavelengths.size() * cond->stimuli.size();
+        float stimT = 0;
+        for (auto* st : cond->stimuli) stimT += st->getTotalTime();
+        float blockDur = (float)n * (stimT + avgITI);
+        if (idx == pos)
+            return String(formatTimeSec(timeBeforeSeq + cumul + blockDur)) + "s";
+        cumul += blockDur;
+        ++idx;
+    }
+    return {};
+}
+
 int ConditionsTableModel::getNumRows()
 {
     if (!protocol) return 0;
@@ -898,6 +976,8 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
         case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
         case ColBaseline: text = getBaselineString(seqIdx); break;
         case ColITI: text = getITIString(seqIdx); break;
+        case ColStartTime: text = getStartTimeString(rowNumber); break;
+        case ColEndTime: text = getEndTimeString(rowNumber); break;
         case ColRepeat: text = String(repeatIdx); break;
         default: break;
     }
@@ -916,6 +996,8 @@ ConditionsTable::ConditionsTable()
     table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
     table.getHeader().addColumn("Baseline", ColBaseline, 70, 56, 100);
     table.getHeader().addColumn("ITI", ColITI, 95, 70, 140);
+    table.getHeader().addColumn("Start", ColStartTime, 62, 50, 100);
+    table.getHeader().addColumn("End", ColEndTime, 62, 50, 100);
     table.getHeader().addColumn("Repeat", ColRepeat, 48, 40, 80);
     table.setHeaderHeight(22);
     table.setRowHeight(30);
@@ -944,7 +1026,7 @@ void ConditionsTable::resized()
     table.setBounds(getLocalBounds());
 }
 
-const int kConditionsTableWidth = 800;
+const int kConditionsTableWidth = 1025;
 const int kConditionsTableGap = 10;
 /** Sequences column width; table is placed immediately to its right. */
 const int kSequencesColumnWidth = 400;

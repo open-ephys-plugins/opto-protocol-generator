@@ -432,6 +432,8 @@ private:
     String getLightPowerString(int seqIdx, int condIdx) const;
     String getBaselineString(int seqIdx) const;
     String getITIString(int seqIdx) const;
+    String getStartTimeString(int row) const;
+    String getEndTimeString(int row) const;
     Protocol* protocol;
     /** Cached (seqIdx+1, condIdx+1, repeatIdx+1) per row, with randomize applied per sequence. */
     Array<std::tuple<int, int, int>> rowOrder;
