@@ -28,6 +28,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <utility>
 using namespace juce;
 
+#define SITES_PER_SOURCE 1
+
 namespace
 {
 // Wave-player format (matches nidaq-test.py): sampleRate, maxVoltage, pulse/sine/custom with durations in source samples.
@@ -535,7 +537,7 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
         deleteSequenceButton->setVisible(parent->getNumSequenceInterfaces() > 1);
     
     Array<String> availableSources = {"Probe A", "Probe B"};
-    Array<int> sitesPerSource = {14, 14};
+    Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
     Array<int> availableWavelengths = {638};
     
     Condition* condition = new Condition(parent,                                             availableSources,
@@ -690,7 +692,7 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         if (result == 0)
             return;
         Array<String> availableSources = {"Probe A", "Probe B"};
-        Array<int> sitesPerSource = {14, 14};
+        Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
         Array<int> availableWavelengths = {638};
         Condition* condition = new Condition(parent, availableSources, sitesPerSource, availableWavelengths, sequence);
         sequence->addCondition(condition);
