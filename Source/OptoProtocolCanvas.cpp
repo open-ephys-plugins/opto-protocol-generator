@@ -70,8 +70,9 @@ static String sequenceToNidaqJson(Sequence* seq, double /*sampleRate*/ = 30000.0
             pulse->setProperty("offDuration", offDuration);
             pulse->setProperty("delayDuration", 0);
             pulse->setProperty("repeatNumber", pt->pulse_count.getIntValue());
-            pulse->setProperty("rampOnDuration", 0);
-            pulse->setProperty("rampOffDuration", (int)(pt->ramp_duration.getFloatValue() / 1000.0f * kSourceSampleRate));
+            int rampSamples = (int)(pt->ramp_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
+            pulse->setProperty("rampOnDuration", rampSamples);
+            pulse->setProperty("rampOffDuration", rampSamples);
             pulse->setProperty("maxVoltage", maxV);
             root->setProperty("pulse", var(pulse.get()));
         }
