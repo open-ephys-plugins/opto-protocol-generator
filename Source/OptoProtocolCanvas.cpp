@@ -529,6 +529,8 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
     deleteSequenceButton->setButtonText("Delete sequence");
     deleteSequenceButton->addListener(this);
     addAndMakeVisible(deleteSequenceButton.get());
+    if (parent != nullptr)
+        deleteSequenceButton->setVisible(parent->getNumSequenceInterfaces() > 1);
     
     Array<String> availableSources = {"Probe A", "Probe B"};
     Array<int> sitesPerSource = {14, 14};
@@ -574,8 +576,6 @@ void OptoSequenceInterface::resized()
     int leftMargin = 15;
     
     sequenceNameLabel->setBounds(leftMargin-5, 20, 140, 20);
-    if (deleteSequenceButton)
-        deleteSequenceButton->setBounds(getWidth() - 120, 18, 105, 22);
     
     baselineIntervalEditor->setBounds(leftMargin, 50, 150, 20);
     minItiEditor->setBounds(leftMargin, 80, 150, 20);
@@ -593,6 +593,12 @@ void OptoSequenceInterface::resized()
     }
     LOGD("New current height: ", currentHeight);
     addConditionButton->setBounds(265, currentHeight+6, 100, 20);
+    if (deleteSequenceButton)
+    {
+        deleteSequenceButton->setBounds(leftMargin, currentHeight+6, 105, 22);
+        if (parent != nullptr)
+            deleteSequenceButton->setVisible(parent->getNumSequenceInterfaces() > 1);
+    }
 }
     
 void OptoSequenceInterface::paint(Graphics& g)
