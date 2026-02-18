@@ -729,7 +729,7 @@ void OptoSequenceInterface::buttonClicked(Button* button)
     }
 }
 
-enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites, ColLightPower, ColRepeat };
+enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites, ColLightPower, ColBaseline, ColITI, ColRepeat };
 
 String ConditionsTableModel::getStructureSignature() const
 {
@@ -843,6 +843,21 @@ String ConditionsTableModel::getLightPowerString(int seqIdx, int condIdx) const
     return seq->conditions[condIdx - 1]->pulse_power.getValueAsString();
 }
 
+String ConditionsTableModel::getBaselineString(int seqIdx) const
+{
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
+    return protocol->sequences[seqIdx - 1]->baseline_interval.getValueAsString().replace(" s", "s");
+}
+
+String ConditionsTableModel::getITIString(int seqIdx) const
+{
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    String minS = seq->min_iti.getValueAsString().replace(" s", "s");
+    String maxS = seq->max_iti.getValueAsString().replace(" s", "s");
+    return minS + " - " + maxS;
+}
+
 int ConditionsTableModel::getNumRows()
 {
     if (!protocol) return 0;
@@ -879,6 +894,8 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
         case ColWavelength: text = getWavelengthString(seqIdx, condIdx); break;
         case ColSites: text = getSitesString(seqIdx, condIdx); break;
         case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
+        case ColBaseline: text = getBaselineString(seqIdx); break;
+        case ColITI: text = getITIString(seqIdx); break;
         case ColRepeat: text = String(repeatIdx); break;
         default: break;
     }
@@ -895,6 +912,8 @@ ConditionsTable::ConditionsTable()
     table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120);
     table.getHeader().addColumn("Sites", ColSites, 85, 60, 150);
     table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
+    table.getHeader().addColumn("Baseline", ColBaseline, 70, 56, 100);
+    table.getHeader().addColumn("ITI", ColITI, 95, 70, 140);
     table.getHeader().addColumn("Repeat", ColRepeat, 48, 40, 80);
     table.setHeaderHeight(22);
     table.setRowHeight(30);
@@ -923,7 +942,7 @@ void ConditionsTable::resized()
     table.setBounds(getLocalBounds());
 }
 
-const int kConditionsTableWidth = 565;
+const int kConditionsTableWidth = 800;
 const int kConditionsTableGap = 10;
 /** Sequences column width; table is placed immediately to its right. */
 const int kSequencesColumnWidth = 400;

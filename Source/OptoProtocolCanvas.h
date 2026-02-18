@@ -430,6 +430,8 @@ private:
     String getWavelengthString(int seqIdx, int condIdx) const;
     String getSitesString(int seqIdx, int condIdx) const;
     String getLightPowerString(int seqIdx, int condIdx) const;
+    String getBaselineString(int seqIdx) const;
+    String getITIString(int seqIdx) const;
     Protocol* protocol;
     /** Cached (seqIdx+1, condIdx+1, repeatIdx+1) per row, with randomize applied per sequence. */
     Array<std::tuple<int, int, int>> rowOrder;
