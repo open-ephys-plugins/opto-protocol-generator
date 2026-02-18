@@ -387,6 +387,11 @@ public:
     /** Returns the total number of trials */
     int getTotalTrials();
 
+    /** Current sequence index (0-based) while running. */
+    int getCurrentSequenceIndex() const { return currentSequenceIndex; }
+    /** Current trial index (1-based within current sequence) while running. */
+    int getCurrentTrialIndex() const { return currentTrialIndex; }
+
     /** Holds the sequences for this protocol */
     OwnedArray<Sequence> sequences;
     

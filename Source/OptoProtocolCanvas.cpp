@@ -938,6 +938,17 @@ String ConditionsTableModel::getEndTimeString(int row) const
     return {};
 }
 
+int ConditionsTableModel::getRowIndexForSequenceAndTrial(int seqIdx, int trialNum) const
+{
+    int n = 0;
+    for (int r = 0; r < rowOrder.size(); ++r)
+    {
+        if (std::get<0>(rowOrder[r]) != seqIdx) continue;
+        if (++n == trialNum) return r;
+    }
+    return -1;
+}
+
 int ConditionsTableModel::getNumRows()
 {
     if (!protocol) return 0;
@@ -952,7 +963,9 @@ int ConditionsTableModel::getNumRows()
 
 void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected)
 {
-    if (rowIsSelected)
+    if (isRunning && rowNumber == activeRow)
+        g.fillAll(Colours::green.withAlpha(0.35f));
+    else if (rowIsSelected)
         g.fillAll(Colours::lightblue.withAlpha(0.3f));
     else if (rowNumber % 2 == 1)
         g.fillAll(Colours::white.withAlpha(0.05f));
@@ -1012,6 +1025,27 @@ void ConditionsTable::setProtocol(Protocol* p)
 void ConditionsTable::refreshTable()
 {
     table.updateContent();
+    table.repaint();
+}
+
+void ConditionsTable::setActiveRow(int row)
+{
+    activeRow = row;
+    model.setActiveRow(row);
+    table.repaint();
+}
+
+void ConditionsTable::setActiveSequenceAndTrial(int seqIdx, int trialNum)
+{
+    int row = model.getRowIndexForSequenceAndTrial(seqIdx, trialNum);
+    setActiveRow(row);
+}
+
+void ConditionsTable::setRunning(bool running)
+{
+    isRunning = running;
+    model.setRunning(running);
+    if (!running) { activeRow = -1; model.setActiveRow(-1); }
     table.repaint();
 }
 
@@ -1184,6 +1218,18 @@ void OptoProtocolInterface::refreshConditionsTable()
 {
     if (conditionsTable)
         conditionsTable->refreshTable();
+}
+
+void OptoProtocolInterface::setActiveTrial(int seqIdx, int trialNum)
+{
+    if (conditionsTable)
+        conditionsTable->setActiveSequenceAndTrial(seqIdx, trialNum);
+}
+
+void OptoProtocolInterface::setTableRunning(bool running)
+{
+    if (conditionsTable)
+        conditionsTable->setRunning(running);
 }
 
 void OptoProtocolInterface::enable()
@@ -1409,7 +1455,14 @@ void OptoProtocolCanvas::actionListenerCallback(const String& message)
     {
         runButton->setButtonText("Run");
         runButton->setEnabled(false);
+        protocolInterfaces.getLast()->setTableRunning(false);
         protocolInterfaces.getLast()->enable();
+    }
+    else
+    {
+        int seqIdx = currentProtocol->getCurrentSequenceIndex() + 1;
+        int trialNum = message.getIntValue();
+        protocolInterfaces.getLast()->setActiveTrial(seqIdx, trialNum);
     }
 }
 
@@ -1475,19 +1528,19 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
             protocolTimeline->start();
             currentProtocol->run();
             button->setButtonText("Pause");
-            
+            protocolInterfaces.getLast()->setTableRunning(true);
         } else {
             protocolTimeline->pause();
             currentProtocol->pause();
             button->setButtonText("Run");
         }
-        
         protocolInterfaces.getLast()->disable();
         
     } else if (button == resetButton.get())
     {
         protocolTimeline->reset();
         currentProtocol->reset();
+        protocolInterfaces.getLast()->setTableRunning(false);
         runButton->setEnabled(true);
         protocolInterfaces.getLast()->enable();
     }

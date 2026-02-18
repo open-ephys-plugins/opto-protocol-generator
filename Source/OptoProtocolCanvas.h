@@ -415,10 +415,14 @@ private:
 class ConditionsTableModel : public TableListBoxModel
 {
 public:
-    ConditionsTableModel() : protocol(nullptr) {}
+    ConditionsTableModel() : protocol(nullptr), activeRow(-1), isRunning(false) {}
     void setProtocol(Protocol* p) { protocol = p; lastStructureSignature.clear(); }
     int getNumRows() override;
     void paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected) override;
+    void setActiveRow(int row) { activeRow = row; }
+    void setRunning(bool r) { isRunning = r; }
+    /** Row index (0-based) for the trialNum-th row (1-based) of sequence seqIdx (1-based); -1 if not found. */
+    int getRowIndexForSequenceAndTrial(int seqIdx, int trialNum) const;
     void paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected) override;
     int getColumnAutoSizeWidth(int columnId) override { return 80; }
 private:
@@ -438,6 +442,8 @@ private:
     /** Cached (seqIdx+1, condIdx+1, repeatIdx+1) per row, with randomize applied per sequence. */
     Array<std::tuple<int, int, int>> rowOrder;
     String lastStructureSignature;
+    int activeRow;
+    bool isRunning;
 };
 
 /** Table listing all condition repeats (one row per trial). */
@@ -448,10 +454,18 @@ public:
     void setProtocol(Protocol* p);
     void refreshTable();
     int getPreferredHeight();
+    /** Set the active row (0-based) when running; -1 to clear. */
+    void setActiveRow(int row);
+    /** Set active row from sequence index (1-based) and trial number (1-based). */
+    void setActiveSequenceAndTrial(int seqIdx, int trialNum);
+    /** Whether the protocol is currently running (timeline updating). */
+    void setRunning(bool running);
 private:
     void resized() override;
     TableListBox table;
     ConditionsTableModel model;
+    int activeRow = -1;
+    bool isRunning = false;
     static const int kHeaderHeight = 22;
     static const int kRowHeight = 30;
 };
@@ -512,7 +526,10 @@ public:
     
     /** Refreshes the conditions table (call when sequences/conditions change). */
     void refreshConditionsTable();
-    
+    /** Set the active trial in the table (seqIdx 1-based, trialNum 1-based). */
+    void setActiveTrial(int seqIdx, int trialNum);
+    /** Set whether the protocol is running (table highlights active row when true). */
+    void setTableRunning(bool running);
 private:
     
     OwnedArray<OptoSequenceInterface> sequenceInterfaces;
