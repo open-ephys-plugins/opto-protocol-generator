@@ -746,10 +746,102 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         
         parent->timeline->setTotalTime(sequence->protocol->getTotalTime());
         parent->timeline->setTotalTrials(sequence->protocol->getTotalTrials());
-    
+        parent->refreshConditionsTable();
     }
 }
-    
+
+enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColRepeat };
+
+void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const
+{
+    if (!protocol) { seqIdx = condIdx = repeatIdx = 0; return; }
+    int r = row;
+    for (int s = 0; s < protocol->sequences.size(); ++s)
+    {
+        Sequence* seq = protocol->sequences[s];
+        for (int c = 0; c < seq->conditions.size(); ++c)
+        {
+            int n = seq->conditions[c]->num_repeats.getIntValue();
+            if (r < n) { seqIdx = s + 1; condIdx = c + 1; repeatIdx = r + 1; return; }
+            r -= n;
+        }
+    }
+    seqIdx = condIdx = repeatIdx = 0;
+}
+
+int ConditionsTableModel::getNumRows()
+{
+    if (!protocol) return 0;
+    int n = 0;
+    for (auto* seq : protocol->sequences)
+        for (auto* cond : seq->conditions)
+            n += cond->num_repeats.getIntValue();
+    return n;
+}
+
+void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected)
+{
+    if (rowIsSelected)
+        g.fillAll(Colours::lightblue.withAlpha(0.3f));
+    else if (rowNumber % 2 == 1)
+        g.fillAll(Colours::white.withAlpha(0.05f));
+}
+
+void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected)
+{
+    int seqIdx, condIdx, repeatIdx;
+    rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx);
+    g.setColour(Colours::white);
+    String text;
+    switch (columnId)
+    {
+        case ColRow: text = String(rowNumber + 1); break;
+        case ColSequence: text = String(seqIdx); break;
+        case ColCondition: text = String(condIdx); break;
+        case ColRepeat: text = String(repeatIdx); break;
+        default: break;
+    }
+    g.drawText(text, 4, 0, width - 6, height, Justification::centredLeft, true);
+}
+
+ConditionsTable::ConditionsTable()
+{
+    table.setModel(&model);
+    table.getHeader().addColumn("Row", ColRow, 50, 40, 200);
+    table.getHeader().addColumn("Sequence", ColSequence, 70, 40, 200);
+    table.getHeader().addColumn("Condition", ColCondition, 70, 40, 200);
+    table.getHeader().addColumn("Repeat", ColRepeat, 60, 40, 200);
+    table.setHeaderHeight(22);
+    table.setRowHeight(20);
+    addAndMakeVisible(table);
+}
+
+void ConditionsTable::setProtocol(Protocol* p)
+{
+    model.setProtocol(p);
+}
+
+void ConditionsTable::refreshTable()
+{
+    table.updateContent();
+    table.repaint();
+}
+
+int ConditionsTable::getPreferredHeight()
+{
+    int n = model.getNumRows();
+    return kHeaderHeight + n * kRowHeight;
+}
+
+void ConditionsTable::resized()
+{
+    table.setBounds(getLocalBounds());
+}
+
+const int kConditionsTableWidth = 260;
+const int kConditionsTableGap = 10;
+/** Sequences column width; table is placed immediately to its right. */
+const int kSequencesColumnWidth = 400;
 
 OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewport_)
     : ParameterOwner(ParameterOwner::OTHER), viewport(viewport_)
@@ -768,6 +860,10 @@ OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewp
     addSequenceButton->addListener(this);
     addAndMakeVisible(addSequenceButton.get());
     
+    conditionsTable = std::make_unique<ConditionsTable>();
+    conditionsTable->setProtocol(protocol.get());
+    addAndMakeVisible(conditionsTable.get());
+    refreshConditionsTable();
 }
 
 
@@ -778,32 +874,29 @@ OptoProtocolInterface::~OptoProtocolInterface()
 
 void OptoProtocolInterface::updateBounds(int expandBy)
 {
-    int currentHeight = 90;
-    
+    int sequencesHeight = 90;
     for (auto interface : sequenceInterfaces)
-    {
-        currentHeight += interface->getHeight();
-    }
-    
+        sequencesHeight += interface->getHeight();
+    int tableHeight = 30 + (conditionsTable ? conditionsTable->getPreferredHeight() : 0);
+    int totalHeight = jmax(sequencesHeight, tableHeight);
     int currentScrollDistance = viewport->getViewPositionY();
-    setBounds(0, 0, getWidth(), currentHeight);
+    setBounds(0, 0, getWidth(), totalHeight);
     viewport->setViewPosition(0, currentScrollDistance);
 }
 
 void OptoProtocolInterface::resized()
 {
-
     int leftMargin = 15;
     int currentHeight = 30;
-    
     for (auto interface : sequenceInterfaces)
     {
-        interface->setBounds(leftMargin, currentHeight, getWidth()-leftMargin, interface->getHeight());
+        interface->setBounds(leftMargin, currentHeight, kSequencesColumnWidth, interface->getHeight());
         currentHeight += interface->getHeight();
     }
-    
-    addSequenceButton->setBounds(leftMargin + 15, currentHeight+5, 150, 20);
-    
+    addSequenceButton->setBounds(leftMargin + 15, currentHeight + 5, 150, 20);
+    int tableX = leftMargin + kSequencesColumnWidth + kConditionsTableGap;
+    if (conditionsTable)
+        conditionsTable->setBounds(tableX, 30, kConditionsTableWidth, conditionsTable->getPreferredHeight());
 }
 
 void OptoProtocolInterface::paint(Graphics& g)
@@ -832,17 +925,16 @@ void OptoProtocolInterface::buttonClicked(Button* button)
         
         timeline->setTotalTime(protocol->getTotalTime());
         timeline->setTotalTrials(protocol->getTotalTrials());
+        refreshConditionsTable();
     }
 }
 
 void OptoProtocolInterface::removeConditionInterface(OptoConditionInterface* conditionInterface)
 {
     for (auto seq : sequenceInterfaces)
-    {
         seq->removeCondition(conditionInterface);
-    }
-    
-    resized();
+    refreshConditionsTable();
+    updateBounds(0);
 }
 
 void OptoProtocolInterface::removeSequenceInterface(OptoSequenceInterface* sequenceInterface)
@@ -858,6 +950,7 @@ void OptoProtocolInterface::removeSequenceInterface(OptoSequenceInterface* seque
     timeline->setTotalTrials(protocol->getTotalTrials());
     updateBounds(0);
     resized();
+    refreshConditionsTable();
     for (auto* si : sequenceInterfaces)
         si->enable();
 }
@@ -881,7 +974,13 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
     
     timeline->setTotalTime(protocol->getTotalTime());
     timeline->setTotalTrials(protocol->getTotalTrials());
-    
+    // Defer table refresh so parameter value is committed (fixes single-sequence num_repeats update)
+    Timer::callAfterDelay(0, [this]()
+    {
+        refreshConditionsTable();
+        updateBounds(0);
+        resized();
+    });
 }
 
 void OptoProtocolInterface::setTimeline(ProtocolTimeline* timeline_)
@@ -891,6 +990,12 @@ void OptoProtocolInterface::setTimeline(ProtocolTimeline* timeline_)
     timeline->setTotalTime(protocol->getTotalTime());
     timeline->setTotalTrials(protocol->getTotalTrials());
     protocol->addActionListener(timeline);
+}
+
+void OptoProtocolInterface::refreshConditionsTable()
+{
+    if (conditionsTable)
+        conditionsTable->refreshTable();
 }
 
 void OptoProtocolInterface::enable()

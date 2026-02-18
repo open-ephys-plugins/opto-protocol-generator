@@ -410,6 +410,37 @@ private:
 
 };
 
+/** Table model for conditions: one row per (sequence, condition, repeat). */
+class ConditionsTableModel : public TableListBoxModel
+{
+public:
+    ConditionsTableModel() : protocol(nullptr) {}
+    void setProtocol(Protocol* p) { protocol = p; }
+    int getNumRows() override;
+    void paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected) override;
+    void paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected) override;
+    int getColumnAutoSizeWidth(int columnId) override { return 80; }
+private:
+    Protocol* protocol;
+    void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const;
+};
+
+/** Table listing all condition repeats (one row per trial). */
+class ConditionsTable : public Component
+{
+public:
+    ConditionsTable();
+    void setProtocol(Protocol* p);
+    void refreshTable();
+    int getPreferredHeight();
+private:
+    void resized() override;
+    TableListBox table;
+    ConditionsTableModel model;
+    static const int kHeaderHeight = 22;
+    static const int kRowHeight = 20;
+};
+
 /**
 * Interface for editing an opto protocol
 */
@@ -464,11 +495,16 @@ public:
     /** Number of sequence interfaces (for delete-button visibility). */
     int getNumSequenceInterfaces() const { return sequenceInterfaces.size(); }
     
+    /** Refreshes the conditions table (call when sequences/conditions change). */
+    void refreshConditionsTable();
+    
 private:
     
     OwnedArray<OptoSequenceInterface> sequenceInterfaces;
     
     std::unique_ptr<TextButton> addSequenceButton;
+    
+    std::unique_ptr<ConditionsTable> conditionsTable;
     
     std::unique_ptr<Protocol> protocol;
     
