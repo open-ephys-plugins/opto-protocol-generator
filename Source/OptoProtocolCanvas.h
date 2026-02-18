@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define OPTOPROTOCOLCANVAS_H_INCLUDED
 
 #include <VisualizerWindowHeaders.h>
+#include <tuple>
 
 #include "Protocol.h"
 
@@ -415,14 +416,19 @@ class ConditionsTableModel : public TableListBoxModel
 {
 public:
     ConditionsTableModel() : protocol(nullptr) {}
-    void setProtocol(Protocol* p) { protocol = p; }
+    void setProtocol(Protocol* p) { protocol = p; lastStructureSignature.clear(); }
     int getNumRows() override;
     void paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected) override;
     void paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected) override;
     int getColumnAutoSizeWidth(int columnId) override { return 80; }
 private:
-    Protocol* protocol;
+    void rebuildRowOrder();
+    String getStructureSignature() const;
     void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const;
+    Protocol* protocol;
+    /** Cached (seqIdx+1, condIdx+1, repeatIdx+1) per row, with randomize applied per sequence. */
+    Array<std::tuple<int, int, int>> rowOrder;
+    String lastStructureSignature;
 };
 
 /** Table listing all condition repeats (one row per trial). */

@@ -24,6 +24,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "OptoProtocolCanvas.h"
 #include "OptoProtocolGenerator.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <tuple>
+#include <utility>
 using namespace juce;
 
 namespace
@@ -752,31 +754,63 @@ void OptoSequenceInterface::buttonClicked(Button* button)
 
 enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColRepeat };
 
-void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const
+String ConditionsTableModel::getStructureSignature() const
 {
-    if (!protocol) { seqIdx = condIdx = repeatIdx = 0; return; }
-    int r = row;
+    if (!protocol) return {};
+    String s;
+    for (auto* seq : protocol->sequences)
+    {
+        for (auto* cond : seq->conditions)
+            s << cond->num_repeats.getIntValue() << ",";
+        s << (seq->randomize.getBoolValue() ? "1" : "0") << ";";
+    }
+    return s;
+}
+
+void ConditionsTableModel::rebuildRowOrder()
+{
+    rowOrder.clear();
+    if (!protocol) return;
     for (int s = 0; s < protocol->sequences.size(); ++s)
     {
         Sequence* seq = protocol->sequences[s];
+        Array<std::pair<int, int>> condRepeat;
         for (int c = 0; c < seq->conditions.size(); ++c)
         {
             int n = seq->conditions[c]->num_repeats.getIntValue();
-            if (r < n) { seqIdx = s + 1; condIdx = c + 1; repeatIdx = r + 1; return; }
-            r -= n;
+            for (int r = 0; r < n; ++r)
+                condRepeat.add({ c, r });
         }
+        if (seq->randomize.getBoolValue() && condRepeat.size() > 1)
+        {
+            auto& rng = Random::getSystemRandom();
+            for (int i = (int)condRepeat.size() - 1; i > 0; --i)
+                condRepeat.swap(i, rng.nextInt(i + 1));
+        }
+        for (auto& p : condRepeat)
+            rowOrder.add(std::make_tuple(s + 1, p.first + 1, p.second + 1));
     }
-    seqIdx = condIdx = repeatIdx = 0;
+}
+
+void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const
+{
+    if (row < 0 || row >= rowOrder.size()) { seqIdx = condIdx = repeatIdx = 0; return; }
+    const auto& t = rowOrder[row];
+    seqIdx = std::get<0>(t);
+    condIdx = std::get<1>(t);
+    repeatIdx = std::get<2>(t);
 }
 
 int ConditionsTableModel::getNumRows()
 {
     if (!protocol) return 0;
-    int n = 0;
-    for (auto* seq : protocol->sequences)
-        for (auto* cond : seq->conditions)
-            n += cond->num_repeats.getIntValue();
-    return n;
+    String sig = getStructureSignature();
+    if (sig != lastStructureSignature)
+    {
+        lastStructureSignature = sig;
+        rebuildRowOrder();
+    }
+    return rowOrder.size();
 }
 
 void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected)
