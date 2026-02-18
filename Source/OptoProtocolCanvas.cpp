@@ -36,84 +36,101 @@ namespace
 static const double kSourceSampleRate = 30000.0;
 static const double kMaxVoltage = 5.0;
 
-static String sequenceToNidaqJson(Sequence* seq, double /*sampleRate*/ = 30000.0)
+static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patternRoot)
+{
+    // 5V for testing; scale by power when needed: (c->pulse_power.getFloatValue() / 10000.0f)
+    const float v = (float)kMaxVoltage;
+    if (s->type == PULSE_TRAIN)
+    {
+        PulseTrain* pt = static_cast<PulseTrain*>(s);
+        float pwMs = pt->pulse_width.getFloatValue();
+        float freqHz = pt->pulse_frequency.getFloatValue();
+        int onDuration = (int)(pwMs / 1000.0f * kSourceSampleRate);
+        if (onDuration < 1) onDuration = 1;
+        float periodSec = freqHz > 0 ? 1.0f / freqHz : 0.1f;
+        int periodSamples = (int)(periodSec * kSourceSampleRate);
+        int offDuration = periodSamples - onDuration;
+        if (offDuration < 1) offDuration = 1;
+        DynamicObject::Ptr pulse = new DynamicObject();
+        pulse->setProperty("analogOutputChannel", 0);
+        pulse->setProperty("onDuration", onDuration);
+        pulse->setProperty("offDuration", offDuration);
+        pulse->setProperty("delayDuration", 0);
+        pulse->setProperty("repeatNumber", pt->pulse_count.getIntValue());
+        int rampSamples = (int)(pt->ramp_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
+        pulse->setProperty("rampOnDuration", rampSamples);
+        pulse->setProperty("rampOffDuration", rampSamples);
+        pulse->setProperty("maxVoltage", v);
+        patternRoot->setProperty("pulse", var(pulse.get()));
+    }
+    else if (s->type == SINUSOID)
+    {
+        SineWave* sw = static_cast<SineWave*>(s);
+        float durMs = sw->sine_wave_duration.getFloatValue();
+        float freqHz = sw->sine_wave_frequency.getFloatValue();
+        int cycles = jmax(1, (int)(durMs / 1000.0f * freqHz + 0.5f));
+        DynamicObject::Ptr sine = new DynamicObject();
+        sine->setProperty("analogOutputChannel", 1);
+        sine->setProperty("frequency", (double)freqHz);
+        sine->setProperty("cycles", cycles);
+        sine->setProperty("delayDuration", 0);
+        sine->setProperty("maxVoltage", v);
+        patternRoot->setProperty("sine", var(sine.get()));
+    }
+    else if (s->type == RAMP)
+    {
+        RampStimulus* rs = static_cast<RampStimulus*>(s);
+        float plateauSec = rs->plateau_duration.getFloatValue() / 1000.0f;
+        int totalSamples = (int)(plateauSec * kSourceSampleRate);
+        int rampOn = (int)(rs->ramp_onset_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
+        int rampOff = (int)(rs->ramp_offset_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
+        DynamicObject::Ptr pulse = new DynamicObject();
+        pulse->setProperty("analogOutputChannel", 0);
+        pulse->setProperty("onDuration", jmax(1, totalSamples));
+        pulse->setProperty("offDuration", 1);
+        pulse->setProperty("delayDuration", 0);
+        pulse->setProperty("repeatNumber", 1);
+        pulse->setProperty("rampOnDuration", rampOn);
+        pulse->setProperty("rampOffDuration", rampOff);
+        pulse->setProperty("maxVoltage", v);
+        patternRoot->setProperty("pulse", var(pulse.get()));
+    }
+    else if (s->type == CUSTOM)
+    {
+        CustomStimulus* cs = static_cast<CustomStimulus*>(s);
+        if (cs->stimulus_waveform.size() > 0)
+        {
+            String str;
+            for (int i = 0; i < cs->stimulus_waveform.size(); i++)
+            {
+                if (i > 0) str << ",";
+                float val = jmax(0.0f, jmin(1.0f, cs->stimulus_waveform[i])) * (float)kMaxVoltage;
+                str << val;
+            }
+            DynamicObject::Ptr custom = new DynamicObject();
+            custom->setProperty("analogOutputChannel", 1);
+            custom->setProperty("string", str);
+            patternRoot->setProperty("custom", var(custom.get()));
+        }
+    }
+}
+
+/** Builds NIDAQ JSON for a single trial (one row); send at start of that trial. */
+static String trialToNidaqJson(Sequence* seq, int trialIndex)
 {
     DynamicObject::Ptr root = new DynamicObject();
     root->setProperty("sampleRate", kSourceSampleRate);
     root->setProperty("maxVoltage", kMaxVoltage);
     root->setProperty("playImmediately", true);
-    root->setProperty("patternType", 0);
-
-    if (seq->conditions.size() == 0)
+    if (seq->conditions.isEmpty())
         return JSON::toString(var(root.get()));
-
-    Condition* c = seq->conditions[0];
-    float power = jmin(1.0f, jmax(0.0f, c->pulse_power.getFloatValue() / 10000.0f));
-    float maxV = (float)(kMaxVoltage * power);
-    if (maxV < 0.01f) maxV = (float)kMaxVoltage;
-
-    bool hasPulse = false, hasSine = false, hasCustom = false;
-    for (Stimulus* s : c->stimuli)
-    {
-        if (s->type == PULSE_TRAIN && !hasPulse)
-        {
-            hasPulse = true;
-            PulseTrain* pt = static_cast<PulseTrain*>(s);
-            float pwMs = pt->pulse_width.getFloatValue();
-            float freqHz = pt->pulse_frequency.getFloatValue();
-            int onDuration = (int)(pwMs / 1000.0f * kSourceSampleRate);
-            if (onDuration < 1) onDuration = 1;
-            float periodSec = freqHz > 0 ? 1.0f / freqHz : 0.1f;
-            int periodSamples = (int)(periodSec * kSourceSampleRate);
-            int offDuration = periodSamples - onDuration;
-            if (offDuration < 1) offDuration = 1;
-
-            DynamicObject::Ptr pulse = new DynamicObject();
-            pulse->setProperty("analogOutputChannel", 0);
-            pulse->setProperty("onDuration", onDuration);
-            pulse->setProperty("offDuration", offDuration);
-            pulse->setProperty("delayDuration", 0);
-            pulse->setProperty("repeatNumber", pt->pulse_count.getIntValue());
-            int rampSamples = (int)(pt->ramp_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
-            pulse->setProperty("rampOnDuration", rampSamples);
-            pulse->setProperty("rampOffDuration", rampSamples);
-            pulse->setProperty("maxVoltage", maxV);
-            root->setProperty("pulse", var(pulse.get()));
-        }
-        else if (s->type == SINUSOID && !hasSine)
-        {
-            hasSine = true;
-            SineWave* sw = static_cast<SineWave*>(s);
-            float durMs = sw->sine_wave_duration.getFloatValue();
-            float freqHz = sw->sine_wave_frequency.getFloatValue();
-            int cycles = jmax(1, (int)(durMs / 1000.0f * freqHz + 0.5f));
-
-            DynamicObject::Ptr sine = new DynamicObject();
-            sine->setProperty("analogOutputChannel", 1);
-            sine->setProperty("frequency", (double)freqHz);
-            sine->setProperty("cycles", cycles);
-            sine->setProperty("delayDuration", 0);
-            sine->setProperty("maxVoltage", maxV);
-            root->setProperty("sine", var(sine.get()));
-        }
-        else if (s->type == CUSTOM && !hasCustom)
-        {
-            CustomStimulus* cs = static_cast<CustomStimulus*>(s);
-            if (cs->stimulus_waveform.size() == 0) continue;
-            hasCustom = true;
-            String str;
-            for (int i = 0; i < cs->stimulus_waveform.size(); i++)
-            {
-                if (i > 0) str << ",";
-                float v = jmax(0.0f, jmin(1.0f, cs->stimulus_waveform[i])) * power * (float)kMaxVoltage;
-                str << v;
-            }
-            DynamicObject::Ptr custom = new DynamicObject();
-            custom->setProperty("analogOutputChannel", 1);
-            custom->setProperty("string", str);
-            root->setProperty("custom", var(custom.get()));
-        }
-    }
+    seq->createTrials();
+    if (trialIndex < 0 || trialIndex >= seq->getTotalTrials())
+        return JSON::toString(var(root.get()));
+    Stimulus* s = seq->getStimulusForTrial(trialIndex);
+    if (!s || !s->condition)
+        return JSON::toString(var(root.get()));
+    addStimulusToPattern(s, s->condition, root.get());
     return JSON::toString(var(root.get()));
 }
 }
@@ -1460,9 +1477,19 @@ void OptoProtocolCanvas::actionListenerCallback(const String& message)
     }
     else
     {
-        int seqIdx = currentProtocol->getCurrentSequenceIndex() + 1;
+        int seqIdx = currentProtocol->getCurrentSequenceIndex();
         int trialNum = message.getIntValue();
-        protocolInterfaces.getLast()->setActiveTrial(seqIdx, trialNum);
+        int trialStarted = trialNum - 1; // message is post-increment
+        if (seqIdx >= 0 && seqIdx < currentProtocol->sequences.size() && trialStarted >= 0)
+        {
+            Sequence* seq = currentProtocol->sequences[seqIdx];
+            if (trialStarted < seq->getTotalTrials())
+            {
+                String json = trialToNidaqJson(seq, trialStarted);
+                processor->sendConfigToNidaqOutput(json);
+            }
+        }
+        protocolInterfaces.getLast()->setActiveTrial(seqIdx + 1, trialNum);
     }
 }
 
@@ -1518,13 +1545,6 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
     {
         if (!protocolTimeline->isRunning)
         {
-            if (currentProtocol->sequences.size() > 0)
-            {
-                Sequence* seq1 = currentProtocol->sequences[0];
-                String json = sequenceToNidaqJson(seq1);
-                LOGC("NIDAQ config: ", json);
-                processor->sendConfigToNidaqOutput(json);
-            }
             protocolTimeline->start();
             currentProtocol->run();
             button->setButtonText("Pause");

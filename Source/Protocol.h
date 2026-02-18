@@ -294,8 +294,10 @@ public:
     /** Gets the duration for the next stimulus */
     float getTrialDuration(int trialIndex);
 
-    /** Creates the trials */
+    /** Creates the trials (must be called before getStimulusForTrial). */
     void createTrials();
+    /** Stimulus for trial index (0-based) in execution order; requires createTrials() first. */
+    Stimulus* getStimulusForTrial(int trialIndex) const;
 
     /** Baseline interval in seconds (delay before start of stimulation) */
     FloatParameter baseline_interval;

@@ -482,6 +482,16 @@ void Sequence::createTrials()
     }
 }
 
+Stimulus* Sequence::getStimulusForTrial(int trialIndex) const
+{
+    if (order.isEmpty() || trialIndex < 0 || trialIndex >= order.size())
+        return nullptr;
+    int idx = order[trialIndex];
+    if (idx < 0 || idx >= stimuli.size())
+        return nullptr;
+    return stimuli[idx];
+}
+
 float Sequence::getTrialDuration(int trialIndex)
 {
     if (order.isEmpty() || trialIndex < 0 || trialIndex >= order.size())
