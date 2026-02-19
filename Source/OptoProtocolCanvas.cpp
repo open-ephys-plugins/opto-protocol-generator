@@ -679,73 +679,50 @@ void OptoSequenceInterface::buttonClicked(Button* button)
     }
     if (button == addConditionButton.get())
     {
-        // add stimulus
         LOGD("Add condition button clicked.");
-        
+        PopupMenu m;
+        m.setLookAndFeel(&getLookAndFeel());
+        m.addItem(1, "Pulse Train", true);
+        m.addItem(2, "Sine Wave", true);
+        m.addItem(3, "Ramp", true);
+        m.addItem(4, "Custom", true);
+        const int result = m.showMenu(PopupMenu::Options{}.withStandardItemHeight(20));
+        if (result == 0)
+            return;
         Array<String> availableSources = {"Probe A", "Probe B"};
         Array<int> sitesPerSource = {14, 14};
         Array<int> availableWavelengths = {638};
-        
-        Condition* condition =new Condition(parent,                                                 availableSources,
-                                            sitesPerSource,
-                                            availableWavelengths,
-                                            sequence);
-        
+        Condition* condition = new Condition(parent, availableSources, sitesPerSource, availableWavelengths, sequence);
         sequence->addCondition(condition);
-        
-        PopupMenu m;
-        m.setLookAndFeel (&getLookAndFeel());
-
-        m.addItem (1, "Pulse Train", true);
-        m.addItem (2, "Sine Wave", true);
-        m.addItem (3, "Ramp", true);
-        m.addItem (4, "Custom", true);
-        
-        const int result = m.showMenu (PopupMenu::Options {}.withStandardItemHeight (20));
-
         if (result == 1)
         {
-            PulseTrain* pulseTrain = new PulseTrain(parent,
-                                                    condition);
-            
+            PulseTrain* pulseTrain = new PulseTrain(parent, condition);
             condition->addStimulus(pulseTrain);
-            
             conditionInterfaces.add(new OptoConditionInterface(condition, pulseTrain, parent));
-            
-        } else if (result == 2)
+        }
+        else if (result == 2)
         {
-            SineWave* sineWave = new SineWave(parent,
-                                                    condition);
-            
+            SineWave* sineWave = new SineWave(parent, condition);
             condition->addStimulus(sineWave);
-            
             conditionInterfaces.add(new OptoConditionInterface(condition, sineWave, parent));
-            
-        } else if (result == 3)
+        }
+        else if (result == 3)
         {
-            RampStimulus* rampStimulus = new RampStimulus(parent,
-                                                    condition);
-            
+            RampStimulus* rampStimulus = new RampStimulus(parent, condition);
             condition->addStimulus(rampStimulus);
-            
             conditionInterfaces.add(new OptoConditionInterface(condition, rampStimulus, parent));
-        } else if (result == 4)
+        }
+        else if (result == 4)
         {
-            CustomStimulus* customStimulus = new CustomStimulus(parent,
-                                                    condition);
-            
+            CustomStimulus* customStimulus = new CustomStimulus(parent, condition);
             condition->addStimulus(customStimulus);
-            
             conditionInterfaces.add(new OptoConditionInterface(condition, customStimulus, parent));
         }
-        
         addAndMakeVisible(conditionInterfaces.getLast());
-        
         int numInterfaces = conditionInterfaces.size();
-        setBounds(0,0,0,230 + (10 + conditionInterfaceHeight) * numInterfaces);
+        setBounds(0, 0, 0, 230 + (10 + conditionInterfaceHeight) * numInterfaces);
         parent->resized();
-        parent->updateBounds(conditionInterfaceHeight-20);
-        
+        parent->updateBounds(conditionInterfaceHeight - 20);
         parent->timeline->setTotalTime(sequence->protocol->getTotalTime());
         parent->timeline->setTotalTrials(sequence->protocol->getTotalTrials());
         parent->refreshConditionsTable();
