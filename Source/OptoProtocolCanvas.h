@@ -425,6 +425,11 @@ private:
     void rebuildRowOrder();
     String getStructureSignature() const;
     void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const;
+    String getConditionName(int seqIdx, int condIdx) const;
+    String getProbeName(int seqIdx, int condIdx) const;
+    String getWavelengthString(int seqIdx, int condIdx) const;
+    String getSitesString(int seqIdx, int condIdx) const;
+    String getLightPowerString(int seqIdx, int condIdx) const;
     Protocol* protocol;
     /** Cached (seqIdx+1, condIdx+1, repeatIdx+1) per row, with randomize applied per sequence. */
     Array<std::tuple<int, int, int>> rowOrder;
@@ -444,7 +449,7 @@ private:
     TableListBox table;
     ConditionsTableModel model;
     static const int kHeaderHeight = 22;
-    static const int kRowHeight = 20;
+    static const int kRowHeight = 30;
 };
 
 /**

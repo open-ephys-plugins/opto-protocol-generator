@@ -752,7 +752,7 @@ void OptoSequenceInterface::buttonClicked(Button* button)
     }
 }
 
-enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColRepeat };
+enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites, ColLightPower, ColRepeat };
 
 String ConditionsTableModel::getStructureSignature() const
 {
@@ -801,6 +801,71 @@ void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int&
     repeatIdx = std::get<2>(t);
 }
 
+String ConditionsTableModel::getConditionName(int seqIdx, int condIdx) const
+{
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return "Condition";
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    if (condIdx < 1 || condIdx > seq->conditions.size()) return "Condition";
+    Condition* cond = seq->conditions[condIdx - 1];
+    if (cond->stimuli.isEmpty()) return "Condition";
+    switch (cond->stimuli[0]->type)
+    {
+        case StimulusType::PULSE_TRAIN: return "Pulse train";
+        case StimulusType::SINUSOID: return "Sine wave";
+        case StimulusType::RAMP: return "Ramp";
+        case StimulusType::CUSTOM: return "Custom";
+        default: return "Condition";
+    }
+}
+
+String ConditionsTableModel::getProbeName(int seqIdx, int condIdx) const
+{
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
+    return seq->conditions[condIdx - 1]->source.getValueAsString();
+}
+
+String ConditionsTableModel::getWavelengthString(int seqIdx, int condIdx) const
+{
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
+    const auto& wl = seq->conditions[condIdx - 1]->availableWavelengths;
+    if (wl.isEmpty()) return {};
+    String s = String(wl[0]);
+    for (int i = 1; i < wl.size(); ++i)
+        s << ", " << wl[i];
+    return s;
+}
+
+String ConditionsTableModel::getSitesString(int seqIdx, int condIdx) const
+{
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    if (condIdx < 1 || condIdx > seq->conditions.size() || !seq->conditions[condIdx - 1]->sites) return {};
+    Condition* cond = seq->conditions[condIdx - 1];
+    int selected = cond->sites->getArrayValue().size();
+    int total = 0;
+    if (cond->sitesPerSource.size() > 0)
+    {
+        int srcIdx = (int)cond->source.getValue();
+        if (srcIdx >= 0 && srcIdx < cond->sitesPerSource.size())
+            total = cond->sitesPerSource[srcIdx];
+        else
+            total = cond->sitesPerSource[0];
+    }
+    return String(selected) + "/" + String(total);
+}
+
+String ConditionsTableModel::getLightPowerString(int seqIdx, int condIdx) const
+{
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
+    return seq->conditions[condIdx - 1]->pulse_power.getValueAsString();
+}
+
 int ConditionsTableModel::getNumRows()
 {
     if (!protocol) return 0;
@@ -826,12 +891,17 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
     int seqIdx, condIdx, repeatIdx;
     rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx);
     g.setColour(Colours::white);
+    g.setFont(Font(12.0f));
     String text;
     switch (columnId)
     {
         case ColRow: text = String(rowNumber + 1); break;
         case ColSequence: text = String(seqIdx); break;
-        case ColCondition: text = String(condIdx); break;
+        case ColCondition: text = getConditionName(seqIdx, condIdx); break;
+        case ColProbe: text = getProbeName(seqIdx, condIdx); break;
+        case ColWavelength: text = getWavelengthString(seqIdx, condIdx); break;
+        case ColSites: text = getSitesString(seqIdx, condIdx); break;
+        case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
         case ColRepeat: text = String(repeatIdx); break;
         default: break;
     }
@@ -841,12 +911,16 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
 ConditionsTable::ConditionsTable()
 {
     table.setModel(&model);
-    table.getHeader().addColumn("Row", ColRow, 50, 40, 200);
-    table.getHeader().addColumn("Sequence", ColSequence, 70, 40, 200);
-    table.getHeader().addColumn("Condition", ColCondition, 70, 40, 200);
-    table.getHeader().addColumn("Repeat", ColRepeat, 60, 40, 200);
+    table.getHeader().addColumn("Trial", ColRow, 44, 36, 80);
+    table.getHeader().addColumn("Sequence", ColSequence, 62, 50, 80);
+    table.getHeader().addColumn("Condition", ColCondition, 88, 70, 120);
+    table.getHeader().addColumn("Probe", ColProbe, 68, 56, 100);
+    table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120);
+    table.getHeader().addColumn("Sites", ColSites, 85, 60, 150);
+    table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
+    table.getHeader().addColumn("Repeat", ColRepeat, 48, 40, 80);
     table.setHeaderHeight(22);
-    table.setRowHeight(20);
+    table.setRowHeight(30);
     addAndMakeVisible(table);
 }
 
@@ -872,7 +946,7 @@ void ConditionsTable::resized()
     table.setBounds(getLocalBounds());
 }
 
-const int kConditionsTableWidth = 260;
+const int kConditionsTableWidth = 565;
 const int kConditionsTableGap = 10;
 /** Sequences column width; table is placed immediately to its right. */
 const int kSequencesColumnWidth = 400;
