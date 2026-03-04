@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <utility>
 using namespace juce;
 
-#define SITES_PER_SOURCE 8
+#define SITES_PER_SOURCE 1
 
 namespace
 {
@@ -747,7 +747,7 @@ void OptoSequenceInterface::buttonClicked(Button* button)
     }
 }
 
-enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites, ColLightPower, ColBaseline, ColITI, ColStartTime, ColEndTime, ColRepeat };
+enum ConditionsTableColumns { ColRow = 1, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites, ColLightPower, ColITI, ColStartTime, ColEndTime, ColRepeat };
 
 String ConditionsTableModel::getStructureSignature() const
 {
@@ -766,6 +766,7 @@ String ConditionsTableModel::getStructureSignature() const
                     s << (int)v << ",";
             s << "|";
         }
+        s << "b" << seq->baseline_interval.getFloatValue() << ";";
         s << (seq->randomize.getBoolValue() ? "1" : "0") << "||";
     }
     return s;
@@ -798,6 +799,8 @@ void ConditionsTableModel::rebuildRowOrder()
             for (int i = (int)condRepeatWlSite.size() - 1; i > 0; --i)
                 condRepeatWlSite.swap(i, rng.nextInt(i + 1));
         }
+        if (seq->baseline_interval.getFloatValue() > 0)
+            rowOrder.add(std::make_tuple(s + 1, 0, 0, 0, 0));
         for (auto& t : condRepeatWlSite)
             rowOrder.add(std::make_tuple(s + 1, std::get<0>(t) + 1, std::get<1>(t) + 1, std::get<2>(t), std::get<3>(t)));
     }
@@ -816,6 +819,7 @@ void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int&
 
 String ConditionsTableModel::getConditionName(int seqIdx, int condIdx) const
 {
+    if (condIdx == 0) return "None";
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return "Condition";
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size()) return "Condition";
@@ -833,6 +837,7 @@ String ConditionsTableModel::getConditionName(int seqIdx, int condIdx) const
 
 String ConditionsTableModel::getProbeName(int seqIdx, int condIdx) const
 {
+    if (condIdx == 0) return "None";
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
@@ -841,6 +846,7 @@ String ConditionsTableModel::getProbeName(int seqIdx, int condIdx) const
 
 String ConditionsTableModel::getWavelengthString(int seqIdx, int condIdx, int wavelengthIdx) const
 {
+    if (condIdx == 0) return "None";
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
@@ -851,6 +857,7 @@ String ConditionsTableModel::getWavelengthString(int seqIdx, int condIdx, int wa
 
 String ConditionsTableModel::getSitesString(int seqIdx, int condIdx, int siteIdx) const
 {
+    if (condIdx == 0) return "None";
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size() || !seq->conditions[condIdx - 1]->sites) return {};
@@ -862,16 +869,26 @@ String ConditionsTableModel::getSitesString(int seqIdx, int condIdx, int siteIdx
 
 String ConditionsTableModel::getLightPowerString(int seqIdx, int condIdx) const
 {
+    if (condIdx == 0) return "None";
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
     return seq->conditions[condIdx - 1]->pulse_power.getValueAsString();
 }
 
-String ConditionsTableModel::getBaselineString(int seqIdx) const
+String ConditionsTableModel::getTrialString(int row) const
 {
-    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
-    return protocol->sequences[seqIdx - 1]->baseline_interval.getValueAsString().replace(" s", "s");
+    if (!protocol || row < 0 || row >= rowOrder.size()) return {};
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    if (condIdx == 0) return "None";
+    int trial = 0;
+    for (int r = 0; r <= row; ++r)
+    {
+        if (std::get<0>(rowOrder[r]) != seqIdx) continue;
+        if (std::get<1>(rowOrder[r]) != 0) ++trial;
+    }
+    return String(trial);
 }
 
 String ConditionsTableModel::getITIString(int seqIdx) const
@@ -909,13 +926,19 @@ String ConditionsTableModel::getStartTimeString(int row) const
         int s, c, p, w, st;
         rowToIndices(r, s, c, p, w, st);
         if (s != seqIdx) continue;
-        Condition* cond = seq->conditions[c - 1];
-        int n = (int)cond->stimuli.size();
-        float stimT = 0;
-        for (auto* st : cond->stimuli) stimT += st->getTotalTime();
-        float blockDur = (float)n * (stimT + avgITI);
+        float blockDur;
+        if (c == 0)
+            blockDur = baseline;
+        else
+        {
+            Condition* cond = seq->conditions[c - 1];
+            int n = (int)cond->stimuli.size();
+            float stimT = 0;
+            for (auto* st : cond->stimuli) stimT += st->getTotalTime();
+            blockDur = (float)n * (stimT + avgITI);
+        }
         if (idx == pos)
-            return String(formatTimeSec(timeBeforeSeq + cumul)) + "s";
+            return String(formatTimeSec(timeBeforeSeq + (c == 0 ? 0 : cumul))) + "s";
         cumul += blockDur;
         ++idx;
     }
@@ -947,13 +970,19 @@ String ConditionsTableModel::getEndTimeString(int row) const
         int s, c, p, w, st;
         rowToIndices(r, s, c, p, w, st);
         if (s != seqIdx) continue;
-        Condition* cond = seq->conditions[c - 1];
-        int n = (int)cond->stimuli.size();
-        float stimT = 0;
-        for (auto* st : cond->stimuli) stimT += st->getTotalTime();
-        float blockDur = (float)n * (stimT + avgITI);
+        float blockDur;
+        if (c == 0)
+            blockDur = baseline;
+        else
+        {
+            Condition* cond = seq->conditions[c - 1];
+            int n = (int)cond->stimuli.size();
+            float stimT = 0;
+            for (auto* st : cond->stimuli) stimT += st->getTotalTime();
+            blockDur = (float)n * (stimT + avgITI);
+        }
         if (idx == pos)
-            return String(formatTimeSec(timeBeforeSeq + cumul + blockDur)) + "s";
+            return String(formatTimeSec(timeBeforeSeq + (c == 0 ? baseline : cumul + blockDur))) + "s";
         cumul += blockDur;
         ++idx;
     }
@@ -964,14 +993,23 @@ int ConditionsTableModel::getRowIndexForSequenceAndTrial(int seqIdx, int trialNu
 {
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return -1;
     Sequence* seq = protocol->sequences[seqIdx - 1];
+    if (trialNum == 0)
+    {
+        for (int r = 0; r < rowOrder.size(); ++r)
+        {
+            if (std::get<0>(rowOrder[r]) != seqIdx) continue;
+            if (std::get<1>(rowOrder[r]) == 0) return r;
+        }
+        return -1;
+    }
     int count = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
         if (std::get<0>(rowOrder[r]) != seqIdx) continue;
         int s, c, p, w, st;
         rowToIndices(r, s, c, p, w, st);
-        Condition* cond = seq->conditions[c - 1];
-        int n = (int)cond->stimuli.size();
+        if (c == 0) continue;
+        int n = (int)seq->conditions[c - 1]->stimuli.size();
         count += n;
         if (count >= trialNum) return r;
     }
@@ -993,7 +1031,11 @@ int ConditionsTableModel::getNumRows()
 void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected)
 {
     if (isRunning && rowNumber == activeRow)
-        g.fillAll(Colours::green.withAlpha(0.35f));
+    {
+        int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
+        rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+        g.fillAll((condIdx == 0 ? Colours::orange : Colours::green).withAlpha(0.35f));
+    }
     else if (rowIsSelected)
         g.fillAll(Colours::lightblue.withAlpha(0.3f));
     else if (rowNumber % 2 == 1)
@@ -1009,18 +1051,17 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
     String text;
     switch (columnId)
     {
-        case ColRow: text = String(rowNumber + 1); break;
+        case ColRow: text = getTrialString(rowNumber); break;
         case ColSequence: text = String(seqIdx); break;
         case ColCondition: text = getConditionName(seqIdx, condIdx); break;
         case ColProbe: text = getProbeName(seqIdx, condIdx); break;
         case ColWavelength: text = getWavelengthString(seqIdx, condIdx, wavelengthIdx); break;
         case ColSites: text = getSitesString(seqIdx, condIdx, siteIdx); break;
         case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
-        case ColBaseline: text = getBaselineString(seqIdx); break;
-        case ColITI: text = getITIString(seqIdx); break;
+        case ColITI: text = (condIdx == 0) ? "None" : getITIString(seqIdx); break;
         case ColStartTime: text = getStartTimeString(rowNumber); break;
         case ColEndTime: text = getEndTimeString(rowNumber); break;
-        case ColRepeat: text = String(repeatIdx); break;
+        case ColRepeat: text = (condIdx == 0) ? "None" : String(repeatIdx); break;
         default: break;
     }
     g.drawText(text, 4, 0, width - 6, height, Justification::centredLeft, true);
@@ -1036,7 +1077,6 @@ ConditionsTable::ConditionsTable()
     table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120);
     table.getHeader().addColumn("Site", ColSites, 85, 60, 150);
     table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
-    table.getHeader().addColumn("Baseline", ColBaseline, 70, 56, 100);
     table.getHeader().addColumn("ITI", ColITI, 95, 70, 140);
     table.getHeader().addColumn("Start", ColStartTime, 62, 50, 100);
     table.getHeader().addColumn("End", ColEndTime, 62, 50, 100);

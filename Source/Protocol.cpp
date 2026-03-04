@@ -548,6 +548,7 @@ void Protocol::run()
         float baselineInterval = sequences[currentSequenceIndex]->baseline_interval.getFloatValue();
 
         LOGD("Starting baseline interval for sequence ", currentSequenceIndex, " with duration ", baselineInterval);
+        sendActionMessage(String(0));
         startTimer(baselineInterval * 1000.0f);
     } else {
         startTimer(0);
