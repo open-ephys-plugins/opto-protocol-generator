@@ -428,10 +428,10 @@ public:
 private:
     void rebuildRowOrder();
     String getStructureSignature() const;
-    void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const;
+    void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx) const;
     String getConditionName(int seqIdx, int condIdx) const;
     String getProbeName(int seqIdx, int condIdx) const;
-    String getWavelengthString(int seqIdx, int condIdx) const;
+    String getWavelengthString(int seqIdx, int condIdx, int wavelengthIdx) const;
     String getSitesString(int seqIdx, int condIdx) const;
     String getLightPowerString(int seqIdx, int condIdx) const;
     String getBaselineString(int seqIdx) const;
@@ -439,8 +439,8 @@ private:
     String getStartTimeString(int row) const;
     String getEndTimeString(int row) const;
     Protocol* protocol;
-    /** Cached (seqIdx+1, condIdx+1, repeatIdx+1) per row, with randomize applied per sequence. */
-    Array<std::tuple<int, int, int>> rowOrder;
+    /** Cached (seqIdx+1, condIdx+1, repeatIdx+1, wavelengthIdx) per row, with randomize applied per sequence. */
+    Array<std::tuple<int, int, int, int>> rowOrder;
     String lastStructureSignature;
     int activeRow;
     bool isRunning;

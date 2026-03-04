@@ -757,8 +757,13 @@ String ConditionsTableModel::getStructureSignature() const
     for (auto* seq : protocol->sequences)
     {
         for (auto* cond : seq->conditions)
+        {
             s << cond->num_repeats.getIntValue() << ",";
-        s << (seq->randomize.getBoolValue() ? "1" : "0") << ";";
+            for (auto wl : cond->availableWavelengths)
+                s << wl << ",";
+            s << ";";
+        }
+        s << (seq->randomize.getBoolValue() ? "1" : "0") << "|";
     }
     return s;
 }
@@ -770,31 +775,36 @@ void ConditionsTableModel::rebuildRowOrder()
     for (int s = 0; s < protocol->sequences.size(); ++s)
     {
         Sequence* seq = protocol->sequences[s];
-        Array<std::pair<int, int>> condRepeat;
+        Array<std::tuple<int, int, int>> condRepeatWl;
         for (int c = 0; c < seq->conditions.size(); ++c)
         {
-            int n = seq->conditions[c]->num_repeats.getIntValue();
+            Condition* cond = seq->conditions[c];
+            int n = cond->num_repeats.getIntValue();
+            int nwl = cond->availableWavelengths.size();
+            if (nwl == 0) nwl = 1;
             for (int r = 0; r < n; ++r)
-                condRepeat.add({ c, r });
+                for (int w = 0; w < nwl; ++w)
+                    condRepeatWl.add({ c, r, w });
         }
-        if (seq->randomize.getBoolValue() && condRepeat.size() > 1)
+        if (seq->randomize.getBoolValue() && condRepeatWl.size() > 1)
         {
             auto& rng = Random::getSystemRandom();
-            for (int i = (int)condRepeat.size() - 1; i > 0; --i)
-                condRepeat.swap(i, rng.nextInt(i + 1));
+            for (int i = (int)condRepeatWl.size() - 1; i > 0; --i)
+                condRepeatWl.swap(i, rng.nextInt(i + 1));
         }
-        for (auto& p : condRepeat)
-            rowOrder.add(std::make_tuple(s + 1, p.first + 1, p.second + 1));
+        for (auto& t : condRepeatWl)
+            rowOrder.add(std::make_tuple(s + 1, std::get<0>(t) + 1, std::get<1>(t) + 1, std::get<2>(t)));
     }
 }
 
-void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx) const
+void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx) const
 {
-    if (row < 0 || row >= rowOrder.size()) { seqIdx = condIdx = repeatIdx = 0; return; }
+    if (row < 0 || row >= rowOrder.size()) { seqIdx = condIdx = repeatIdx = wavelengthIdx = 0; return; }
     const auto& t = rowOrder[row];
     seqIdx = std::get<0>(t);
     condIdx = std::get<1>(t);
     repeatIdx = std::get<2>(t);
+    wavelengthIdx = std::get<3>(t);
 }
 
 String ConditionsTableModel::getConditionName(int seqIdx, int condIdx) const
@@ -822,17 +832,14 @@ String ConditionsTableModel::getProbeName(int seqIdx, int condIdx) const
     return seq->conditions[condIdx - 1]->source.getValueAsString();
 }
 
-String ConditionsTableModel::getWavelengthString(int seqIdx, int condIdx) const
+String ConditionsTableModel::getWavelengthString(int seqIdx, int condIdx, int wavelengthIdx) const
 {
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
     const auto& wl = seq->conditions[condIdx - 1]->availableWavelengths;
-    if (wl.isEmpty()) return {};
-    String s = String(wl[0]);
-    for (int i = 1; i < wl.size(); ++i)
-        s << ", " << wl[i];
-    return s;
+    if (wl.isEmpty() || wavelengthIdx < 0 || wavelengthIdx >= wl.size()) return {};
+    return String(wl[wavelengthIdx]);
 }
 
 String ConditionsTableModel::getSitesString(int seqIdx, int condIdx) const
@@ -881,8 +888,8 @@ static float formatTimeSec(float t) { return (int)(t * 100.0f + 0.5f) / 100.0f; 
 String ConditionsTableModel::getStartTimeString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx);
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
     float timeBeforeSeq = 0;
     for (int s = 0; s < seqIdx - 1; ++s)
@@ -890,21 +897,21 @@ String ConditionsTableModel::getStartTimeString(int row) const
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
-        int s, c, p;
-        rowToIndices(r, s, c, p);
+        int s, c, p, w;
+        rowToIndices(r, s, c, p, w);
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
-    float avgITI = 0.5f * (seq->min_iti.getFloatValue() + seq->max_iti.getFloatValue());
+    float avgITI = seq->min_iti.getFloatValue() * 0.5f + seq->max_iti.getFloatValue() * 0.5f;
     float cumul = baseline;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
-        int s, c, p;
-        rowToIndices(r, s, c, p);
+        int s, c, p, w;
+        rowToIndices(r, s, c, p, w);
         if (s != seqIdx) continue;
         Condition* cond = seq->conditions[c - 1];
-        int n = cond->sites->getArrayValue().size() * cond->availableWavelengths.size() * cond->stimuli.size();
+        int n = cond->sites->getArrayValue().size() * cond->stimuli.size();
         float stimT = 0;
         for (auto* st : cond->stimuli) stimT += st->getTotalTime();
         float blockDur = (float)n * (stimT + avgITI);
@@ -919,8 +926,8 @@ String ConditionsTableModel::getStartTimeString(int row) const
 String ConditionsTableModel::getEndTimeString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx);
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
     float timeBeforeSeq = 0;
     for (int s = 0; s < seqIdx - 1; ++s)
@@ -928,21 +935,21 @@ String ConditionsTableModel::getEndTimeString(int row) const
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
-        int s, c, p;
-        rowToIndices(r, s, c, p);
+        int s, c, p, w;
+        rowToIndices(r, s, c, p, w);
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
-    float avgITI = 0.5f * (seq->min_iti.getFloatValue() + seq->max_iti.getFloatValue());
+    float avgITI = seq->min_iti.getFloatValue() * 0.5f + seq->max_iti.getFloatValue() * 0.5f;
     float cumul = baseline;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
-        int s, c, p;
-        rowToIndices(r, s, c, p);
+        int s, c, p, w;
+        rowToIndices(r, s, c, p, w);
         if (s != seqIdx) continue;
         Condition* cond = seq->conditions[c - 1];
-        int n = cond->sites->getArrayValue().size() * cond->availableWavelengths.size() * cond->stimuli.size();
+        int n = cond->sites->getArrayValue().size() * cond->stimuli.size();
         float stimT = 0;
         for (auto* st : cond->stimuli) stimT += st->getTotalTime();
         float blockDur = (float)n * (stimT + avgITI);
@@ -956,11 +963,18 @@ String ConditionsTableModel::getEndTimeString(int row) const
 
 int ConditionsTableModel::getRowIndexForSequenceAndTrial(int seqIdx, int trialNum) const
 {
-    int n = 0;
+    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return -1;
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    int count = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
         if (std::get<0>(rowOrder[r]) != seqIdx) continue;
-        if (++n == trialNum) return r;
+        int s, c, p, w;
+        rowToIndices(r, s, c, p, w);
+        Condition* cond = seq->conditions[c - 1];
+        int n = cond->sites->getArrayValue().size() * cond->stimuli.size();
+        count += n;
+        if (count >= trialNum) return r;
     }
     return -1;
 }
@@ -989,8 +1003,8 @@ void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int wi
 
 void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected)
 {
-    int seqIdx, condIdx, repeatIdx;
-    rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx);
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx;
+    rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx);
     g.setColour(Colours::white);
     g.setFont(Font(12.0f));
     String text;
@@ -1000,7 +1014,7 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
         case ColSequence: text = String(seqIdx); break;
         case ColCondition: text = getConditionName(seqIdx, condIdx); break;
         case ColProbe: text = getProbeName(seqIdx, condIdx); break;
-        case ColWavelength: text = getWavelengthString(seqIdx, condIdx); break;
+        case ColWavelength: text = getWavelengthString(seqIdx, condIdx, wavelengthIdx); break;
         case ColSites: text = getSitesString(seqIdx, condIdx); break;
         case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
         case ColBaseline: text = getBaselineString(seqIdx); break;
