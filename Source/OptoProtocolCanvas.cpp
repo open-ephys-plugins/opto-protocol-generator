@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <utility>
 using namespace juce;
 
-#define SITES_PER_SOURCE 1
+#define SITES_PER_SOURCE 8
 
 namespace
 {
@@ -447,7 +447,6 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
 
 OptoConditionInterface::~OptoConditionInterface()
 {
-    
 }
     
 void OptoConditionInterface::resized()
@@ -762,8 +761,12 @@ String ConditionsTableModel::getStructureSignature() const
             for (auto wl : cond->availableWavelengths)
                 s << wl << ",";
             s << ";";
+            if (cond->sites)
+                for (auto& v : cond->sites->getArrayValue())
+                    s << (int)v << ",";
+            s << "|";
         }
-        s << (seq->randomize.getBoolValue() ? "1" : "0") << "|";
+        s << (seq->randomize.getBoolValue() ? "1" : "0") << "||";
     }
     return s;
 }
@@ -775,36 +778,40 @@ void ConditionsTableModel::rebuildRowOrder()
     for (int s = 0; s < protocol->sequences.size(); ++s)
     {
         Sequence* seq = protocol->sequences[s];
-        Array<std::tuple<int, int, int>> condRepeatWl;
+        Array<std::tuple<int, int, int, int>> condRepeatWlSite;
         for (int c = 0; c < seq->conditions.size(); ++c)
         {
             Condition* cond = seq->conditions[c];
             int n = cond->num_repeats.getIntValue();
             int nwl = cond->availableWavelengths.size();
             if (nwl == 0) nwl = 1;
+            int nsite = cond->sites ? cond->sites->getArrayValue().size() : 0;
+            if (nsite == 0) nsite = 1;
             for (int r = 0; r < n; ++r)
                 for (int w = 0; w < nwl; ++w)
-                    condRepeatWl.add({ c, r, w });
+                    for (int st = 0; st < nsite; ++st)
+                        condRepeatWlSite.add({ c, r, w, st });
         }
-        if (seq->randomize.getBoolValue() && condRepeatWl.size() > 1)
+        if (seq->randomize.getBoolValue() && condRepeatWlSite.size() > 1)
         {
             auto& rng = Random::getSystemRandom();
-            for (int i = (int)condRepeatWl.size() - 1; i > 0; --i)
-                condRepeatWl.swap(i, rng.nextInt(i + 1));
+            for (int i = (int)condRepeatWlSite.size() - 1; i > 0; --i)
+                condRepeatWlSite.swap(i, rng.nextInt(i + 1));
         }
-        for (auto& t : condRepeatWl)
-            rowOrder.add(std::make_tuple(s + 1, std::get<0>(t) + 1, std::get<1>(t) + 1, std::get<2>(t)));
+        for (auto& t : condRepeatWlSite)
+            rowOrder.add(std::make_tuple(s + 1, std::get<0>(t) + 1, std::get<1>(t) + 1, std::get<2>(t), std::get<3>(t)));
     }
 }
 
-void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx) const
+void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx, int& siteIdx) const
 {
-    if (row < 0 || row >= rowOrder.size()) { seqIdx = condIdx = repeatIdx = wavelengthIdx = 0; return; }
+    if (row < 0 || row >= rowOrder.size()) { seqIdx = condIdx = repeatIdx = wavelengthIdx = siteIdx = 0; return; }
     const auto& t = rowOrder[row];
     seqIdx = std::get<0>(t);
     condIdx = std::get<1>(t);
     repeatIdx = std::get<2>(t);
     wavelengthIdx = std::get<3>(t);
+    siteIdx = std::get<4>(t);
 }
 
 String ConditionsTableModel::getConditionName(int seqIdx, int condIdx) const
@@ -842,23 +849,15 @@ String ConditionsTableModel::getWavelengthString(int seqIdx, int condIdx, int wa
     return String(wl[wavelengthIdx]);
 }
 
-String ConditionsTableModel::getSitesString(int seqIdx, int condIdx) const
+String ConditionsTableModel::getSitesString(int seqIdx, int condIdx, int siteIdx) const
 {
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size() || !seq->conditions[condIdx - 1]->sites) return {};
     Condition* cond = seq->conditions[condIdx - 1];
-    int selected = cond->sites->getArrayValue().size();
-    int total = 0;
-    if (cond->sitesPerSource.size() > 0)
-    {
-        int srcIdx = (int)cond->source.getValue();
-        if (srcIdx >= 0 && srcIdx < cond->sitesPerSource.size())
-            total = cond->sitesPerSource[srcIdx];
-        else
-            total = cond->sitesPerSource[0];
-    }
-    return String(selected) + "/" + String(total);
+    const auto& arr = cond->sites->getArrayValue();
+    if (siteIdx < 0 || siteIdx >= arr.size()) return {};
+    return String((int)arr[siteIdx]);
 }
 
 String ConditionsTableModel::getLightPowerString(int seqIdx, int condIdx) const
@@ -888,8 +887,8 @@ static float formatTimeSec(float t) { return (int)(t * 100.0f + 0.5f) / 100.0f; 
 String ConditionsTableModel::getStartTimeString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx);
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
     float timeBeforeSeq = 0;
     for (int s = 0; s < seqIdx - 1; ++s)
@@ -897,8 +896,8 @@ String ConditionsTableModel::getStartTimeString(int row) const
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
-        int s, c, p, w;
-        rowToIndices(r, s, c, p, w);
+        int s, c, p, w, st;
+        rowToIndices(r, s, c, p, w, st);
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
@@ -907,11 +906,11 @@ String ConditionsTableModel::getStartTimeString(int row) const
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
-        int s, c, p, w;
-        rowToIndices(r, s, c, p, w);
+        int s, c, p, w, st;
+        rowToIndices(r, s, c, p, w, st);
         if (s != seqIdx) continue;
         Condition* cond = seq->conditions[c - 1];
-        int n = cond->sites->getArrayValue().size() * cond->stimuli.size();
+        int n = (int)cond->stimuli.size();
         float stimT = 0;
         for (auto* st : cond->stimuli) stimT += st->getTotalTime();
         float blockDur = (float)n * (stimT + avgITI);
@@ -926,8 +925,8 @@ String ConditionsTableModel::getStartTimeString(int row) const
 String ConditionsTableModel::getEndTimeString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx);
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
     float timeBeforeSeq = 0;
     for (int s = 0; s < seqIdx - 1; ++s)
@@ -935,8 +934,8 @@ String ConditionsTableModel::getEndTimeString(int row) const
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
-        int s, c, p, w;
-        rowToIndices(r, s, c, p, w);
+        int s, c, p, w, st;
+        rowToIndices(r, s, c, p, w, st);
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
@@ -945,11 +944,11 @@ String ConditionsTableModel::getEndTimeString(int row) const
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
-        int s, c, p, w;
-        rowToIndices(r, s, c, p, w);
+        int s, c, p, w, st;
+        rowToIndices(r, s, c, p, w, st);
         if (s != seqIdx) continue;
         Condition* cond = seq->conditions[c - 1];
-        int n = cond->sites->getArrayValue().size() * cond->stimuli.size();
+        int n = (int)cond->stimuli.size();
         float stimT = 0;
         for (auto* st : cond->stimuli) stimT += st->getTotalTime();
         float blockDur = (float)n * (stimT + avgITI);
@@ -969,10 +968,10 @@ int ConditionsTableModel::getRowIndexForSequenceAndTrial(int seqIdx, int trialNu
     for (int r = 0; r < rowOrder.size(); ++r)
     {
         if (std::get<0>(rowOrder[r]) != seqIdx) continue;
-        int s, c, p, w;
-        rowToIndices(r, s, c, p, w);
+        int s, c, p, w, st;
+        rowToIndices(r, s, c, p, w, st);
         Condition* cond = seq->conditions[c - 1];
-        int n = cond->sites->getArrayValue().size() * cond->stimuli.size();
+        int n = (int)cond->stimuli.size();
         count += n;
         if (count >= trialNum) return r;
     }
@@ -1003,8 +1002,8 @@ void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int wi
 
 void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected)
 {
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx;
-    rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx);
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
+    rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
     g.setColour(Colours::white);
     g.setFont(Font(12.0f));
     String text;
@@ -1015,7 +1014,7 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
         case ColCondition: text = getConditionName(seqIdx, condIdx); break;
         case ColProbe: text = getProbeName(seqIdx, condIdx); break;
         case ColWavelength: text = getWavelengthString(seqIdx, condIdx, wavelengthIdx); break;
-        case ColSites: text = getSitesString(seqIdx, condIdx); break;
+        case ColSites: text = getSitesString(seqIdx, condIdx, siteIdx); break;
         case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
         case ColBaseline: text = getBaselineString(seqIdx); break;
         case ColITI: text = getITIString(seqIdx); break;
@@ -1035,7 +1034,7 @@ ConditionsTable::ConditionsTable()
     table.getHeader().addColumn("Condition", ColCondition, 88, 70, 120);
     table.getHeader().addColumn("Probe", ColProbe, 68, 56, 100);
     table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120);
-    table.getHeader().addColumn("Sites", ColSites, 85, 60, 150);
+    table.getHeader().addColumn("Site", ColSites, 85, 60, 150);
     table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
     table.getHeader().addColumn("Baseline", ColBaseline, 70, 56, 100);
     table.getHeader().addColumn("ITI", ColITI, 95, 70, 140);
