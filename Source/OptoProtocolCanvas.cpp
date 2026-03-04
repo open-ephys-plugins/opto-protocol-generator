@@ -872,9 +872,8 @@ String ConditionsTableModel::getITIString(int seqIdx) const
 {
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
-    String minS = seq->min_iti.getValueAsString().replace(" s", "s");
-    String maxS = seq->max_iti.getValueAsString().replace(" s", "s");
-    return minS + " - " + maxS;
+    float avgITI = 0.5f * (seq->min_iti.getFloatValue() + seq->max_iti.getFloatValue());
+    return String(avgITI, (avgITI >= 10.f || avgITI == (int)avgITI) ? 0 : 1) + "s";
 }
 
 static float formatTimeSec(float t) { return (int)(t * 100.0f + 0.5f) / 100.0f; }
