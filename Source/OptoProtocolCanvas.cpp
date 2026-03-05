@@ -1034,7 +1034,22 @@ void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int wi
     {
         int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
         rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
-        g.fillAll((condIdx == 0 ? Colours::orange : Colours::green).withAlpha(0.35f));
+        Colour c;
+        if (condIdx == 0)
+            c = Colours::orange;
+        else if (protocol && seqIdx >= 1 && seqIdx <= protocol->sequences.size())
+        {
+            const auto& wl = protocol->sequences[seqIdx - 1]->conditions[condIdx - 1]->availableWavelengths;
+            if (wavelengthIdx >= 0 && wavelengthIdx < wl.size() && wl[wavelengthIdx] == 450)
+                c = Colours::blue;
+            else if (wavelengthIdx >= 0 && wavelengthIdx < wl.size() && wl[wavelengthIdx] == 638)
+                c = Colours::red;
+            else
+                c = Colours::green;
+        }
+        else
+            c = Colours::green;
+        g.fillAll(c.withAlpha(0.35f));
     }
     else if (rowIsSelected)
         g.fillAll(Colours::lightblue.withAlpha(0.3f));
