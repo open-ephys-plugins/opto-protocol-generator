@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <utility>
 using namespace juce;
 
-#define SITES_PER_SOURCE 1
+#define SITES_PER_SOURCE 2
 
 namespace
 {
@@ -864,7 +864,7 @@ String ConditionsTableModel::getSitesString(int seqIdx, int condIdx, int siteIdx
     Condition* cond = seq->conditions[condIdx - 1];
     const auto& arr = cond->sites->getArrayValue();
     if (siteIdx < 0 || siteIdx >= arr.size()) return {};
-    return String((int)arr[siteIdx]);
+    return String((int)arr[siteIdx] + 1);
 }
 
 String ConditionsTableModel::getLightPowerString(int seqIdx, int condIdx) const
@@ -1090,9 +1090,9 @@ ConditionsTable::ConditionsTable()
     table.getHeader().addColumn("Condition", ColCondition, 88, 70, 120);
     table.getHeader().addColumn("Probe", ColProbe, 68, 56, 100);
     table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120);
-    table.getHeader().addColumn("Site", ColSites, 85, 60, 150);
+    table.getHeader().addColumn("Site", ColSites, 26, 18, 45);
     table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
-    table.getHeader().addColumn("ITI", ColITI, 95, 70, 140);
+    table.getHeader().addColumn("ITI", ColITI, 29, 21, 42);
     table.getHeader().addColumn("Start", ColStartTime, 62, 50, 100);
     table.getHeader().addColumn("End", ColEndTime, 62, 50, 100);
     table.getHeader().addColumn("Repeat", ColRepeat, 48, 40, 80);
