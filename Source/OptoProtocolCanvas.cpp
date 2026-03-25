@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "OptoProtocolCanvas.h"
 #include "OptoProtocolGenerator.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <cmath>
 #include <tuple>
 #include <utility>
 using namespace juce;
@@ -113,6 +114,24 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
             patternRoot->setProperty("custom", var(custom.get()));
         }
     }
+}
+
+/** Truncated normal in [lo, hi]: Box–Muller with rejection; σ = span/4. */
+static float sampleNormalItiInRange(float lo, float hi, Random& rng)
+{
+    if (!(lo < hi)) return lo;
+    const float mean = 0.5f * (lo + hi);
+    const float sigma = (hi - lo) * 0.25f;
+    for (int k = 0; k < 64; ++k)
+    {
+        float u1 = rng.nextFloat();
+        if (u1 <= 0.f) u1 = 1.0e-30f;
+        const float u2 = rng.nextFloat();
+        const float z = std::sqrt(-2.f * std::log(u1)) * std::cos(2.f * MathConstants<float>::pi * u2);
+        const float x = mean + z * sigma;
+        if (x >= lo && x <= hi) return x;
+    }
+    return jlimit(lo, hi, mean);
 }
 
 /** Builds NIDAQ JSON for a single trial (one row); send at start of that trial. */
@@ -767,7 +786,8 @@ String ConditionsTableModel::getStructureSignature() const
             s << "|";
         }
         s << "b" << seq->baseline_interval.getFloatValue() << ";";
-        s << (seq->randomize.getBoolValue() ? "1" : "0") << "||";
+        s << (seq->randomize.getBoolValue() ? "1" : "0") << ";";
+        s << seq->min_iti.getFloatValue() << "," << seq->max_iti.getFloatValue() << "||";
     }
     return s;
 }
@@ -775,6 +795,7 @@ String ConditionsTableModel::getStructureSignature() const
 void ConditionsTableModel::rebuildRowOrder()
 {
     rowOrder.clear();
+    rowIti.clear();
     if (!protocol) return;
     for (int s = 0; s < protocol->sequences.size(); ++s)
     {
@@ -792,16 +813,24 @@ void ConditionsTableModel::rebuildRowOrder()
                     for (int st = 0; st < nsite; ++st)
                         condRepeatWlSite.add({ c, r, w, st });
         }
+        auto& rng = Random::getSystemRandom();
         if (seq->randomize.getBoolValue() && condRepeatWlSite.size() > 1)
         {
-            auto& rng = Random::getSystemRandom();
             for (int i = (int)condRepeatWlSite.size() - 1; i > 0; --i)
                 condRepeatWlSite.swap(i, rng.nextInt(i + 1));
         }
+        const float minITI = seq->min_iti.getFloatValue();
+        const float maxITI = seq->max_iti.getFloatValue();
         if (seq->baseline_interval.getFloatValue() > 0)
+        {
             rowOrder.add(std::make_tuple(s + 1, 0, 0, 0, 0));
+            rowIti.add(0.f);
+        }
         for (auto& t : condRepeatWlSite)
+        {
             rowOrder.add(std::make_tuple(s + 1, std::get<0>(t) + 1, std::get<1>(t) + 1, std::get<2>(t), std::get<3>(t)));
+            rowIti.add(sampleNormalItiInRange(minITI, maxITI, rng));
+        }
     }
 }
 
@@ -890,12 +919,11 @@ String ConditionsTableModel::getTrialString(int row) const
     return String(trial);
 }
 
-String ConditionsTableModel::getITIString(int seqIdx) const
+String ConditionsTableModel::getITIString(int row) const
 {
-    if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
-    Sequence* seq = protocol->sequences[seqIdx - 1];
-    float avgITI = 0.5f * (seq->min_iti.getFloatValue() + seq->max_iti.getFloatValue());
-    return String(avgITI, (avgITI >= 10.f || avgITI == (int)avgITI) ? 0 : 1) + "s";
+    if (!protocol || row < 0 || row >= rowIti.size()) return {};
+    const float iti = rowIti.getUnchecked(row);
+    return String(iti, (iti >= 10.f || iti == (int)iti) ? 0 : 1) + "s";
 }
 
 static float formatTimeSec(float t) { return (int)(t * 100.0f + 0.5f) / 100.0f; }
@@ -917,7 +945,6 @@ String ConditionsTableModel::getStartTimeString(int row) const
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
-    float avgITI = seq->min_iti.getFloatValue() * 0.5f + seq->max_iti.getFloatValue() * 0.5f;
     float cumul = baseline;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
@@ -934,7 +961,8 @@ String ConditionsTableModel::getStartTimeString(int row) const
             int n = (int)cond->stimuli.size();
             float stimT = 0;
             for (auto* st : cond->stimuli) stimT += st->getTotalTime();
-            blockDur = (float)n * (stimT + avgITI);
+            const float iti = rowIti.getUnchecked(r);
+            blockDur = (float)n * (stimT + iti);
         }
         if (idx == pos)
             return String(formatTimeSec(timeBeforeSeq + (c == 0 ? 0 : cumul))) + "s";
@@ -961,7 +989,6 @@ String ConditionsTableModel::getEndTimeString(int row) const
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
-    float avgITI = seq->min_iti.getFloatValue() * 0.5f + seq->max_iti.getFloatValue() * 0.5f;
     float cumul = baseline;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
@@ -978,7 +1005,8 @@ String ConditionsTableModel::getEndTimeString(int row) const
             int n = (int)cond->stimuli.size();
             float stimT = 0;
             for (auto* st : cond->stimuli) stimT += st->getTotalTime();
-            blockDur = (float)n * (stimT + avgITI);
+            const float iti = rowIti.getUnchecked(r);
+            blockDur = (float)n * (stimT + iti);
         }
         if (idx == pos)
             return String(formatTimeSec(timeBeforeSeq + (c == 0 ? baseline : cumul + blockDur))) + "s";
@@ -1072,7 +1100,7 @@ void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, i
         case ColWavelength: text = getWavelengthString(seqIdx, condIdx, wavelengthIdx); break;
         case ColSites: text = getSitesString(seqIdx, condIdx, siteIdx); break;
         case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
-        case ColITI: text = (condIdx == 0) ? "None" : getITIString(seqIdx); break;
+        case ColITI: text = (condIdx == 0) ? "None" : getITIString(rowNumber); break;
         case ColStartTime: text = getStartTimeString(rowNumber); break;
         case ColEndTime: text = getEndTimeString(rowNumber); break;
         case ColRepeat: text = (condIdx == 0) ? "None" : String(repeatIdx); break;

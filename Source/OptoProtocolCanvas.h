@@ -434,13 +434,15 @@ private:
     String getWavelengthString(int seqIdx, int condIdx, int wavelengthIdx) const;
     String getSitesString(int seqIdx, int condIdx, int siteIdx) const;
     String getLightPowerString(int seqIdx, int condIdx) const;
-    String getITIString(int seqIdx) const;
+    String getITIString(int row) const;
     String getStartTimeString(int row) const;
     String getEndTimeString(int row) const;
     String getTrialString(int row) const;
     Protocol* protocol;
     /** Cached (seqIdx+1, condIdx+1, repeatIdx+1, wavelengthIdx, siteIdx) per row, with randomize applied per sequence. */
     Array<std::tuple<int, int, int, int, int>> rowOrder;
+    /** Per-row sampled ITI (s) for table display; baseline rows use 0. */
+    Array<float> rowIti;
     String lastStructureSignature;
     int activeRow;
     bool isRunning;
