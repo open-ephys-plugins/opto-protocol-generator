@@ -785,7 +785,6 @@ void ConditionsTableModel::rebuildRowOrder()
             Condition* cond = seq->conditions[c];
             int n = cond->num_repeats.getIntValue();
             int nwl = cond->availableWavelengths.size();
-            if (nwl == 0) nwl = 1;
             int nsite = cond->sites ? cond->sites->getArrayValue().size() : 0;
             if (nsite == 0) nsite = 1;
             for (int r = 0; r < n; ++r)
