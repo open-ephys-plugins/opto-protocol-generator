@@ -1084,29 +1084,69 @@ void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int wi
         g.fillAll(Colours::white.withAlpha(0.05f));
 }
 
-void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected)
+String ConditionsTableModel::getCellText(int rowNumber, int columnId) const
 {
     int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
     rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
-    g.setColour(Colours::white);
-    g.setFont(Font(12.0f));
-    String text;
     switch (columnId)
     {
-        case ColRow: text = getTrialString(rowNumber); break;
-        case ColSequence: text = String(seqIdx); break;
-        case ColCondition: text = getConditionName(seqIdx, condIdx); break;
-        case ColProbe: text = getProbeName(seqIdx, condIdx); break;
-        case ColWavelength: text = getWavelengthString(seqIdx, condIdx, wavelengthIdx); break;
-        case ColSites: text = getSitesString(seqIdx, condIdx, siteIdx); break;
-        case ColLightPower: text = getLightPowerString(seqIdx, condIdx); break;
-        case ColITI: text = (condIdx == 0) ? "None" : getITIString(rowNumber); break;
-        case ColStartTime: text = getStartTimeString(rowNumber); break;
-        case ColEndTime: text = getEndTimeString(rowNumber); break;
-        case ColRepeat: text = (condIdx == 0) ? "None" : String(repeatIdx); break;
-        default: break;
+        case ColRow: return getTrialString(rowNumber);
+        case ColSequence: return String(seqIdx);
+        case ColCondition: return getConditionName(seqIdx, condIdx);
+        case ColProbe: return getProbeName(seqIdx, condIdx);
+        case ColWavelength: return getWavelengthString(seqIdx, condIdx, wavelengthIdx);
+        case ColSites: return getSitesString(seqIdx, condIdx, siteIdx);
+        case ColLightPower: return getLightPowerString(seqIdx, condIdx);
+        case ColITI: return (condIdx == 0) ? "None" : getITIString(rowNumber);
+        case ColStartTime: return getStartTimeString(rowNumber);
+        case ColEndTime: return getEndTimeString(rowNumber);
+        case ColRepeat: return (condIdx == 0) ? "None" : String(repeatIdx);
+        default: return {};
     }
-    g.drawText(text, 4, 0, width - 6, height, Justification::centredLeft, true);
+}
+
+void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected)
+{
+    g.setColour(Colours::white);
+    g.setFont(Font(12.0f));
+    g.drawText(getCellText(rowNumber, columnId), 4, 0, width - 6, height, Justification::centredLeft, true);
+}
+
+String ConditionsTableModel::exportCsv()
+{
+    if (!protocol) return {};
+    static const char* headerNames[] = {
+        "Trial", "Sequence", "Condition", "Probe", "Wavelength", "Site",
+        "Light Power", "ITI", "Start", "End", "Repeat"
+    };
+    static const int colIds[] = {
+        ColRow, ColSequence, ColCondition, ColProbe, ColWavelength, ColSites,
+        ColLightPower, ColITI, ColStartTime, ColEndTime, ColRepeat
+    };
+    static const int numCols = 11;
+    auto escape = [](const String& s) -> String {
+        if (s.containsAnyOf(",\"\r\n"))
+            return "\"" + s.replace("\"", "\"\"") + "\"";
+        return s;
+    };
+    const int n = getNumRows();
+    String out;
+    for (int c = 0; c < numCols; ++c)
+    {
+        if (c > 0) out << ",";
+        out << escape(String(headerNames[c]));
+    }
+    out << "\n";
+    for (int r = 0; r < n; ++r)
+    {
+        for (int c = 0; c < numCols; ++c)
+        {
+            if (c > 0) out << ",";
+            out << escape(getCellText(r, colIds[c]));
+        }
+        out << "\n";
+    }
+    return out;
 }
 
 ConditionsTable::ConditionsTable()
@@ -1171,10 +1211,23 @@ void ConditionsTable::resized()
     table.setBounds(getLocalBounds());
 }
 
+String ConditionsTable::exportTableAsCsv()
+{
+    return model.exportCsv();
+}
+
+int ConditionsTable::getNumRows()
+{
+    return model.getNumRows();
+}
+
 const int kConditionsTableWidth = 1025;
 const int kConditionsTableGap = 10;
 /** Sequences column width; table is placed immediately to its right. */
 const int kSequencesColumnWidth = 400;
+const int kSaveCsvButtonTop = 30;
+const int kSaveCsvButtonH = 20;
+const int kConditionsTableTop = kSaveCsvButtonTop + kSaveCsvButtonH + 4;
 
 OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewport_)
     : ParameterOwner(ParameterOwner::OTHER), viewport(viewport_)
@@ -1193,6 +1246,11 @@ OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewp
     addSequenceButton->addListener(this);
     addAndMakeVisible(addSequenceButton.get());
     
+    saveTableCsvButton = std::make_unique<TextButton>("saveTableCsv");
+    saveTableCsvButton->setButtonText("Export Table");
+    saveTableCsvButton->addListener(this);
+    addAndMakeVisible(saveTableCsvButton.get());
+    
     conditionsTable = std::make_unique<ConditionsTable>();
     conditionsTable->setProtocol(protocol.get());
     addAndMakeVisible(conditionsTable.get());
@@ -1210,7 +1268,7 @@ void OptoProtocolInterface::updateBounds(int expandBy)
     int sequencesHeight = 90;
     for (auto interface : sequenceInterfaces)
         sequencesHeight += interface->getHeight();
-    int tableHeight = 30 + (conditionsTable ? conditionsTable->getPreferredHeight() : 0);
+    int tableHeight = kConditionsTableTop + (conditionsTable ? conditionsTable->getPreferredHeight() : 0);
     int totalHeight = jmax(sequencesHeight, tableHeight);
     int currentScrollDistance = viewport->getViewPositionY();
     setBounds(0, 0, getWidth(), totalHeight);
@@ -1228,8 +1286,10 @@ void OptoProtocolInterface::resized()
     }
     addSequenceButton->setBounds(leftMargin + 15, currentHeight + 5, 150, 20);
     int tableX = leftMargin + kSequencesColumnWidth + kConditionsTableGap;
+    if (saveTableCsvButton)
+        saveTableCsvButton->setBounds(tableX, kSaveCsvButtonTop, 150, kSaveCsvButtonH);
     if (conditionsTable)
-        conditionsTable->setBounds(tableX, 30, kConditionsTableWidth, conditionsTable->getPreferredHeight());
+        conditionsTable->setBounds(tableX, kConditionsTableTop, kConditionsTableWidth, conditionsTable->getPreferredHeight());
 }
 
 void OptoProtocolInterface::paint(Graphics& g)
@@ -1240,9 +1300,23 @@ void OptoProtocolInterface::paint(Graphics& g)
 
 }
 
-
 void OptoProtocolInterface::buttonClicked(Button* button)
 {
+    if (button == saveTableCsvButton.get())
+    {
+        const Time t = Time::getCurrentTime();
+        const String defaultName = "opto-protocol_" + t.formatted("%Y_%m_%d_%H_%M_%S") + ".csv";
+        const File defaultFile = File::getSpecialLocation(File::userDesktopDirectory).getChildFile(defaultName);
+        fileChooser = std::make_unique<juce::FileChooser>("Export table as CSV", defaultFile, "*.csv", true, false, this);
+        const auto flags = FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles;
+        fileChooser->launchAsync(flags, [this](const juce::FileChooser& c) {
+            const File f = c.getResult();
+            if (f != File())
+                f.replaceWithText(conditionsTable->exportTableAsCsv());
+            fileChooser.reset();
+        });
+        return;
+    }
     if (button == addSequenceButton.get())
     {
         LOGD("Add sequence button clicked");
@@ -1329,6 +1403,15 @@ void OptoProtocolInterface::refreshConditionsTable()
 {
     if (conditionsTable)
         conditionsTable->refreshTable();
+    updateExportTableButtonState();
+}
+
+void OptoProtocolInterface::updateExportTableButtonState()
+{
+    if (!saveTableCsvButton || !conditionsTable)
+        return;
+    const bool editingEnabled = addSequenceButton->isEnabled();
+    saveTableCsvButton->setEnabled(editingEnabled && conditionsTable->getNumRows() > 0);
 }
 
 void OptoProtocolInterface::setActiveTrial(int seqIdx, int trialNum)
@@ -1351,6 +1434,7 @@ void OptoProtocolInterface::enable()
     }
     
     addSequenceButton->setEnabled(true);
+    updateExportTableButtonState();
 }
 
 void OptoProtocolInterface::disable()
@@ -1363,6 +1447,8 @@ void OptoProtocolInterface::disable()
     }
     
     addSequenceButton->setEnabled(false);
+    if (saveTableCsvButton)
+        saveTableCsvButton->setEnabled(false);
 }
 
 

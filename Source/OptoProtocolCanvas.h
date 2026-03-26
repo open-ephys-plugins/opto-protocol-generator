@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Protocol.h"
 
+namespace juce { class FileChooser; }
 class OptoProtocolGenerator;
 class OptoProtocolInterface;
 
@@ -425,7 +426,10 @@ public:
     int getRowIndexForSequenceAndTrial(int seqIdx, int trialNum) const;
     void paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected) override;
     int getColumnAutoSizeWidth(int columnId) override { return 80; }
+    /** Full table as CSV (header + rows); empty if no protocol. */
+    String exportCsv();
 private:
+    String getCellText(int rowNumber, int columnId) const;
     void rebuildRowOrder();
     String getStructureSignature() const;
     void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx, int& siteIdx) const;
@@ -462,6 +466,8 @@ public:
     void setActiveSequenceAndTrial(int seqIdx, int trialNum);
     /** Whether the protocol is currently running (timeline updating). */
     void setRunning(bool running);
+    String exportTableAsCsv();
+    int getNumRows();
 private:
     void resized() override;
     TableListBox table;
@@ -533,10 +539,13 @@ public:
     /** Set whether the protocol is running (table highlights active row when true). */
     void setTableRunning(bool running);
 private:
+    void updateExportTableButtonState();
     
     OwnedArray<OptoSequenceInterface> sequenceInterfaces;
     
     std::unique_ptr<TextButton> addSequenceButton;
+    std::unique_ptr<TextButton> saveTableCsvButton;
+    std::unique_ptr<juce::FileChooser> fileChooser;
     
     std::unique_ptr<ConditionsTable> conditionsTable;
     
