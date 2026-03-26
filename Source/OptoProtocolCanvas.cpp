@@ -1231,6 +1231,9 @@ const int kConditionsTableGap = 10;
 const int kSequencesColumnWidth = 400;
 const int kSaveCsvButtonTop = 30;
 const int kSaveCsvButtonH = 20;
+const int kSaveCsvButtonW = 150;
+const int kExportStatusLabelGap = 8;
+const int kExportStatusLabelWidth = 280;
 const int kConditionsTableTop = kSaveCsvButtonTop + kSaveCsvButtonH + 4;
 
 OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewport_)
@@ -1254,6 +1257,12 @@ OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewp
     saveTableCsvButton->setButtonText("Export Table");
     saveTableCsvButton->addListener(this);
     addAndMakeVisible(saveTableCsvButton.get());
+    
+    exportStatusLabel = std::make_unique<Label>("exportStatusLabel", "*");
+    exportStatusLabel->setFont(FontOptions("Inter", "Regular", 12));
+    exportStatusLabel->setJustificationType(Justification::centredLeft);
+    exportStatusLabel->setColour(Label::textColourId, findColour(ThemeColours::defaultText));
+    addAndMakeVisible(exportStatusLabel.get());
     
     conditionsTable = std::make_unique<ConditionsTable>();
     conditionsTable->setProtocol(protocol.get());
@@ -1291,7 +1300,10 @@ void OptoProtocolInterface::resized()
     addSequenceButton->setBounds(leftMargin + 15, currentHeight + 5, 150, 20);
     int tableX = leftMargin + kSequencesColumnWidth + kConditionsTableGap;
     if (saveTableCsvButton)
-        saveTableCsvButton->setBounds(tableX, kSaveCsvButtonTop, 150, kSaveCsvButtonH);
+        saveTableCsvButton->setBounds(tableX, kSaveCsvButtonTop, kSaveCsvButtonW, kSaveCsvButtonH);
+    if (exportStatusLabel)
+        exportStatusLabel->setBounds(tableX + kSaveCsvButtonW + kExportStatusLabelGap, kSaveCsvButtonTop,
+                                       kExportStatusLabelWidth, kSaveCsvButtonH);
     if (conditionsTable)
         conditionsTable->setBounds(tableX, kConditionsTableTop, kConditionsTableWidth, conditionsTable->getPreferredHeight());
 }
@@ -1309,14 +1321,24 @@ void OptoProtocolInterface::buttonClicked(Button* button)
     if (button == saveTableCsvButton.get())
     {
         const Time t = Time::getCurrentTime();
-        const String defaultName = "opto-protocol_" + t.formatted("%Y_%m_%d_%H_%M_%S") + ".csv";
+        const String stamp = t.formatted("%Y_%m_%d_%H_%M_%S");
+        String namePrefix = File::createLegalFileName(protocol->name).trim();
+        if (namePrefix.isEmpty())
+            namePrefix = "protocol";
+        const String defaultName = namePrefix + "_" + stamp + ".csv";
         const File defaultFile = File::getSpecialLocation(File::userDesktopDirectory).getChildFile(defaultName);
         fileChooser = std::make_unique<juce::FileChooser>("Export table as CSV", defaultFile, "*.csv", true, false, this);
         const auto flags = FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles;
-        fileChooser->launchAsync(flags, [this](const juce::FileChooser& c) {
+        fileChooser->launchAsync(flags, [this, stamp](const juce::FileChooser& c) {
             const File f = c.getResult();
             if (f != File())
-                f.replaceWithText(conditionsTable->exportTableAsCsv());
+            {
+                const String csv = conditionsTable->exportTableAsCsv();
+                f.replaceWithText(csv);
+                lastExportedCsvSnapshot = csv;
+                lastSavedTimestampDisplay = stamp;
+                updateExportStatusLabel();
+            }
             fileChooser.reset();
         });
         return;
@@ -1408,6 +1430,7 @@ void OptoProtocolInterface::refreshConditionsTable()
     if (conditionsTable)
         conditionsTable->refreshTable();
     updateExportTableButtonState();
+    updateExportStatusLabel();
 }
 
 void OptoProtocolInterface::updateExportTableButtonState()
@@ -1416,6 +1439,19 @@ void OptoProtocolInterface::updateExportTableButtonState()
         return;
     const bool editingEnabled = addSequenceButton->isEnabled();
     saveTableCsvButton->setEnabled(editingEnabled && conditionsTable->getNumRows() > 0);
+}
+
+void OptoProtocolInterface::updateExportStatusLabel()
+{
+    if (exportStatusLabel == nullptr || !conditionsTable)
+        return;
+    const String current = conditionsTable->exportTableAsCsv();
+    if (lastExportedCsvSnapshot.isEmpty())
+        exportStatusLabel->setText("*", dontSendNotification);
+    else if (current != lastExportedCsvSnapshot)
+        exportStatusLabel->setText(lastSavedTimestampDisplay + " *", dontSendNotification);
+    else
+        exportStatusLabel->setText(lastSavedTimestampDisplay, dontSendNotification);
 }
 
 void OptoProtocolInterface::setActiveTrial(int seqIdx, int trialNum)
@@ -1713,6 +1749,8 @@ void OptoProtocolInterface::loadProtocolFromXml(XmlElement* protocolElement)
         timeline->setTotalTime(protocol->getTotalTime());
         timeline->setTotalTrials(protocol->getTotalTrials());
     }
+    lastExportedCsvSnapshot.clear();
+    lastSavedTimestampDisplay.clear();
     refreshConditionsTable();
     updateBounds(0);
     resized();

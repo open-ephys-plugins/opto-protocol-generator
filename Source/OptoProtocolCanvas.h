@@ -551,12 +551,16 @@ public:
     void setTableRunning(bool running);
 private:
     void updateExportTableButtonState();
+    void updateExportStatusLabel();
     void clearAllSequences();
     
     OwnedArray<OptoSequenceInterface> sequenceInterfaces;
     
     std::unique_ptr<TextButton> addSequenceButton;
     std::unique_ptr<TextButton> saveTableCsvButton;
+    std::unique_ptr<Label> exportStatusLabel;
+    String lastExportedCsvSnapshot;
+    String lastSavedTimestampDisplay;
     std::unique_ptr<juce::FileChooser> fileChooser;
     
     std::unique_ptr<ConditionsTable> conditionsTable;
