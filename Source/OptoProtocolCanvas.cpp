@@ -1737,6 +1737,7 @@ void OptoProtocolCanvas::loadCustomParametersFromXml(XmlElement* xml)
             pi->getProtocol()->removeActionListener(protocolTimeline.get());
             pi->getProtocol()->removeActionListener(this);
         }
+        currentProtocol = nullptr;
         viewport->setViewedComponent(nullptr, false);
         protocolInterfaces.clear(true);
         protocolSelector->clear(dontSendNotification);
@@ -1758,15 +1759,58 @@ void OptoProtocolCanvas::loadCustomParametersFromXml(XmlElement* xml)
             protocolInterfaces.add(iface);
             protocolSelector->addItem(iface->getProtocol()->name, 1);
         }
-        viewport->setViewedComponent(protocolInterfaces[0], false);
         protocolSelector->setSelectedId(selectedId, dontSendNotification);
         if (protocolSelector->getSelectedId() == 0)
             protocolSelector->setSelectedId(1, dontSendNotification);
-        const int idx = jlimit(1, protocolInterfaces.size(), protocolSelector->getSelectedId());
-        currentProtocol = protocolInterfaces[idx - 1]->getProtocol();
-        currentProtocol->addActionListener(this);
-        resized();
+        applySelectedProtocol();
     }
+}
+
+OptoProtocolInterface* OptoProtocolCanvas::getCurrentInterface()
+{
+    const int id = protocolSelector->getSelectedId();
+    if (id <= 0 || id > protocolInterfaces.size())
+        return nullptr;
+    return protocolInterfaces[id - 1];
+}
+
+void OptoProtocolCanvas::applySelectedProtocol()
+{
+    if (protocolTimeline->isRunning)
+    {
+        protocolTimeline->pause();
+        if (currentProtocol != nullptr)
+            currentProtocol->pause();
+    }
+    runButton->setButtonText("Run");
+    runButton->setEnabled(true);
+
+    if (currentProtocol != nullptr)
+        currentProtocol->removeActionListener(this);
+
+    const int id = protocolSelector->getSelectedId();
+    if (id <= 0 || id > protocolInterfaces.size())
+        return;
+
+    OptoProtocolInterface* iface = protocolInterfaces[id - 1];
+    viewport->setViewedComponent(iface, false);
+    currentProtocol = iface->getProtocol();
+    currentProtocol->addActionListener(this);
+
+    protocolTimeline->reset();
+    protocolTimeline->setTotalTime(currentProtocol->getTotalTime());
+    protocolTimeline->setTotalTrials(currentProtocol->getTotalTrials());
+
+    iface->setTableRunning(false);
+    iface->enable();
+
+    iface->setSize(viewport->getMaximumVisibleWidth(), iface->getHeight());
+    iface->updateBounds(0);
+    iface->resized();
+    resized();
+
+    if (deleteProtocolButton != nullptr)
+        deleteProtocolButton->setEnabled(protocolInterfaces.size() > 1);
 }
 
 
@@ -1945,6 +1989,7 @@ OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     deleteProtocolButton = std::make_unique<TextButton>("deleteProtocolButton");
     deleteProtocolButton->setButtonText("Delete");
     deleteProtocolButton->addListener(this);
+    deleteProtocolButton->setEnabled(protocolInterfaces.size() > 1);
     addAndMakeVisible(deleteProtocolButton.get());
     
     runButton = std::make_unique<TextButton>("runButton");
@@ -1966,12 +2011,16 @@ OptoProtocolCanvas::~OptoProtocolCanvas()
 
 void OptoProtocolCanvas::actionListenerCallback(const String& message)
 {
+    OptoProtocolInterface* iface = getCurrentInterface();
     if (message.equalsIgnoreCase("FINISHED"))
     {
         runButton->setButtonText("Run");
         runButton->setEnabled(false);
-        protocolInterfaces.getLast()->setTableRunning(false);
-        protocolInterfaces.getLast()->enable();
+        if (iface != nullptr)
+        {
+            iface->setTableRunning(false);
+            iface->enable();
+        }
     }
     else
     {
@@ -1987,7 +2036,8 @@ void OptoProtocolCanvas::actionListenerCallback(const String& message)
                 processor->sendConfigToNidaqOutput(json);
             }
         }
-        protocolInterfaces.getLast()->setActiveTrial(seqIdx + 1, trialNum);
+        if (iface != nullptr)
+            iface->setActiveTrial(seqIdx + 1, trialNum);
     }
 }
 
@@ -2018,7 +2068,12 @@ void OptoProtocolCanvas::resized()
      viewport->setBounds(0, headerHeight, getWidth(), getHeight()-headerHeight);
 
      // Set the width of the content component to match the viewport's width
-    protocolInterfaces[0]->setSize(viewport->getMaximumVisibleWidth(), protocolInterfaces[0]->getHeight());
+    const int selId = protocolSelector->getSelectedId();
+    if (selId > 0 && selId <= protocolInterfaces.size())
+    {
+        auto* pi = protocolInterfaces[selId - 1];
+        pi->setSize(viewport->getMaximumVisibleWidth(), pi->getHeight());
+    }
 
 }
 
@@ -2039,34 +2094,94 @@ void OptoProtocolCanvas::refresh()
 
 void OptoProtocolCanvas::buttonClicked(Button* button)
 {
-    if (button == runButton.get())
+    if (button == newProtocolButton.get())
     {
+        const int n = protocolInterfaces.size() + 1;
+        const String name = "Optotagging " + String(n);
+        auto* iface = new OptoProtocolInterface(name, viewport.get());
+        iface->setTimeline(protocolTimeline.get());
+        protocolInterfaces.add(iface);
+        protocolSelector->addItem(name, n);
+        protocolSelector->setSelectedId(n, dontSendNotification);
+        applySelectedProtocol();
+    }
+    else if (button == deleteProtocolButton.get())
+    {
+        if (protocolInterfaces.size() <= 1)
+            return;
+        OptoProtocolInterface* iface = getCurrentInterface();
+        if (iface == nullptr)
+            return;
+        const String pname = iface->getProtocol()->name;
+        if (! AlertWindow::showOkCancelBox(AlertWindow::WarningIcon,
+                                           "Delete protocol",
+                                           "Are you sure you want to delete \"" + pname + "\"?",
+                                           "Delete",
+                                           "Cancel",
+                                           this))
+            return;
+
+        if (protocolTimeline->isRunning)
+        {
+            protocolTimeline->pause();
+            iface->getProtocol()->pause();
+        }
+        runButton->setButtonText("Run");
+        runButton->setEnabled(true);
+
+        iface->getProtocol()->removeActionListener(this);
+        iface->getProtocol()->removeActionListener(protocolTimeline.get());
+
+        const int oldIdx = protocolSelector->getSelectedId() - 1;
+
+        viewport->setViewedComponent(nullptr, false);
+        currentProtocol = nullptr;
+
+        protocolInterfaces.removeObject(iface, true);
+
+        protocolSelector->clear(dontSendNotification);
+        for (int i = 0; i < protocolInterfaces.size(); ++i)
+            protocolSelector->addItem(protocolInterfaces[i]->getProtocol()->name, i + 1);
+
+        const int newSelIdx = jmin(oldIdx, protocolInterfaces.size() - 1);
+        protocolSelector->setSelectedId(newSelIdx + 1, dontSendNotification);
+        applySelectedProtocol();
+    }
+    else if (button == runButton.get())
+    {
+        OptoProtocolInterface* iface = getCurrentInterface();
         if (!protocolTimeline->isRunning)
         {
             protocolTimeline->start();
             currentProtocol->run();
             button->setButtonText("Pause");
-            protocolInterfaces.getLast()->setTableRunning(true);
+            if (iface != nullptr)
+                iface->setTableRunning(true);
         } else {
             protocolTimeline->pause();
             currentProtocol->pause();
             button->setButtonText("Run");
         }
-        protocolInterfaces.getLast()->disable();
+        if (iface != nullptr)
+            iface->disable();
         
     } else if (button == resetButton.get())
     {
+        OptoProtocolInterface* iface = getCurrentInterface();
         protocolTimeline->reset();
         currentProtocol->reset();
-        protocolInterfaces.getLast()->setTableRunning(false);
+        if (iface != nullptr)
+            iface->setTableRunning(false);
         runButton->setEnabled(true);
-        protocolInterfaces.getLast()->enable();
+        if (iface != nullptr)
+            iface->enable();
     }
 }
 
 void OptoProtocolCanvas::comboBoxChanged(ComboBox* comboBox)
 {
-    
+    if (comboBox == protocolSelector.get())
+        applySelectedProtocol();
 }
 
 void OptoProtocolCanvas::paint(Graphics& g)

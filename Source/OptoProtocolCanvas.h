@@ -618,6 +618,10 @@ public:
 
 private:
 
+    OptoProtocolInterface* getCurrentInterface();
+    void applySelectedProtocol();
+
+
     /** ComboBox for selecting a protocol */
     std::unique_ptr<ComboBox> protocolSelector;
     
