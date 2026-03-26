@@ -550,7 +550,8 @@ void OptoConditionInterface::paint(Graphics& g)
 
 OptoSequenceInterface::OptoSequenceInterface(const String& name,
                                              Sequence* sequence_,
-                                             OptoProtocolInterface* parent_)
+                                             OptoProtocolInterface* parent_,
+                                             bool skipDefaultCondition)
     : sequence(sequence_), parent(parent_)
 {
     
@@ -571,25 +572,25 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
     if (parent != nullptr)
         deleteSequenceButton->setVisible(parent->getNumSequenceInterfaces() > 1);
     
-    Array<String> availableSources = {"Probe A", "Probe B"};
-    Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
-    Array<int> availableWavelengths = {638};
-    
-    Condition* condition = new Condition(parent,                                             availableSources,
-                                         sitesPerSource,
-                                         availableWavelengths,
-                                         sequence);
-    
-    sequence->addCondition(condition);
-    
-    PulseTrain* pulseTrain = new PulseTrain(parent,
-                                            condition);
-    
-    
-    condition->addStimulus(pulseTrain);
-    
-    conditionInterfaces.add(new OptoConditionInterface(condition, pulseTrain, parent));
-    addAndMakeVisible(conditionInterfaces.getLast());
+    if (!skipDefaultCondition)
+    {
+        Array<String> availableSources = {"Probe A", "Probe B"};
+        Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
+        Array<int> availableWavelengths = {638};
+        
+        Condition* condition = new Condition(parent, availableSources,
+                                             sitesPerSource,
+                                             availableWavelengths,
+                                             sequence);
+        
+        sequence->addCondition(condition);
+        
+        PulseTrain* pulseTrain = new PulseTrain(parent, condition);
+        condition->addStimulus(pulseTrain);
+        
+        conditionInterfaces.add(new OptoConditionInterface(condition, pulseTrain, parent));
+        addAndMakeVisible(conditionInterfaces.getLast());
+    }
     
     baselineIntervalEditor = std::make_unique<BoundedValueParameterEditor>(&sequence->baseline_interval);
     addAndMakeVisible(baselineIntervalEditor.get());
@@ -600,7 +601,10 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
     randomizeEditor = std::make_unique<ToggleParameterEditor>(&sequence->randomize);
     addAndMakeVisible(randomizeEditor.get());
     
-    setBounds(0, 0, 0, 230 + conditionInterfaceHeight);
+    int h = 230;
+    for (int i = 0; i < conditionInterfaces.size(); ++i)
+        h += (i == 0 ? conditionInterfaceHeight : 10 + conditionInterfaceHeight);
+    setBounds(0, 0, 0, h);
 }
     
 
@@ -1449,6 +1453,320 @@ void OptoProtocolInterface::disable()
     addSequenceButton->setEnabled(false);
     if (saveTableCsvButton)
         saveTableCsvButton->setEnabled(false);
+}
+
+namespace
+{
+static void appendStimulusXml(XmlElement* condEl, Stimulus* s)
+{
+    XmlElement* st = condEl->createNewChildElement("STIMULUS");
+    switch (s->type)
+    {
+        case PULSE_TRAIN:
+        {
+            auto* pt = static_cast<PulseTrain*>(s);
+            st->setAttribute("type", "pulse");
+            st->setAttribute("pulseWidth", pt->pulse_width.getFloatValue());
+            st->setAttribute("pulseFrequency", pt->pulse_frequency.getFloatValue());
+            st->setAttribute("pulseCount", pt->pulse_count.getIntValue());
+            st->setAttribute("rampDuration", pt->ramp_duration.getFloatValue());
+            break;
+        }
+        case SINUSOID:
+        {
+            auto* sw = static_cast<SineWave*>(s);
+            st->setAttribute("type", "sine");
+            st->setAttribute("sineWaveDuration", sw->sine_wave_duration.getFloatValue());
+            st->setAttribute("sineWaveFrequency", sw->sine_wave_frequency.getFloatValue());
+            break;
+        }
+        case RAMP:
+        {
+            auto* rs = static_cast<RampStimulus*>(s);
+            st->setAttribute("type", "ramp");
+            st->setAttribute("plateauDuration", rs->plateau_duration.getFloatValue());
+            st->setAttribute("rampOnsetDuration", rs->ramp_onset_duration.getFloatValue());
+            st->setAttribute("rampOffsetDuration", rs->ramp_offset_duration.getFloatValue());
+            st->setAttribute("rampProfile", rs->ramp_profile.getSelectedIndex());
+            break;
+        }
+        case CUSTOM:
+        {
+            auto* cs = static_cast<CustomStimulus*>(s);
+            st->setAttribute("type", "custom");
+            st->setAttribute("sampleFrequency", cs->sample_frequency.getFloatValue());
+            String w;
+            for (int i = 0; i < cs->stimulus_waveform.size(); ++i)
+            {
+                if (i > 0) w << ",";
+                w << String(cs->stimulus_waveform[i], 8);
+            }
+            st->setAttribute("waveform", w);
+            break;
+        }
+        default: break;
+    }
+}
+
+static void appendConditionXml(XmlElement* seqEl, Condition* cond)
+{
+    XmlElement* c = seqEl->createNewChildElement("CONDITION");
+    c->setAttribute("numRepeats", cond->num_repeats.getIntValue());
+    c->setAttribute("sourceIndex", cond->source.getSelectedIndex());
+    c->setAttribute("pulsePower", cond->pulse_power.getFloatValue());
+    String wl;
+    for (int i = 0; i < cond->availableWavelengths.size(); ++i)
+    {
+        if (i > 0) wl << ",";
+        wl << cond->availableWavelengths[i];
+    }
+    c->setAttribute("wavelengths", wl);
+    String sitesStr;
+    const auto siteArr = cond->sites->getArrayValue();
+    for (int i = 0; i < siteArr.size(); ++i)
+    {
+        if (i > 0) sitesStr << ",";
+        sitesStr << String(static_cast<int>(siteArr[i]));
+    }
+    c->setAttribute("sites", sitesStr);
+    for (auto* stimulus : cond->stimuli)
+        appendStimulusXml(c, stimulus);
+}
+} // namespace
+
+String OptoSequenceInterface::getSequenceDisplayName() const
+{
+    return sequenceNameLabel ? sequenceNameLabel->getText() : String("Sequence");
+}
+
+void OptoSequenceInterface::syncDeleteSequenceVisibility()
+{
+    if (deleteSequenceButton != nullptr && parent != nullptr)
+        deleteSequenceButton->setVisible(parent->getNumSequenceInterfaces() > 1);
+}
+
+void OptoSequenceInterface::importConditionFromXml(XmlElement* cEl)
+{
+    if (cEl == nullptr || cEl->getTagName() != "CONDITION")
+        return;
+    Array<String> availableSources = {"Probe A", "Probe B"};
+    Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
+    Array<int> availableWavelengths = {638};
+    Condition* condition = new Condition(parent, availableSources, sitesPerSource, availableWavelengths, sequence);
+    sequence->addCondition(condition);
+    condition->availableWavelengths.clear();
+    {
+        String wl = cEl->getStringAttribute("wavelengths", "638");
+        StringArray tokens;
+        tokens.addTokens(wl, ",", "");
+        for (auto& t : tokens)
+            if (t.isNotEmpty())
+                condition->addWavelength(t.getIntValue());
+        if (condition->availableWavelengths.isEmpty())
+            condition->addWavelength(638);
+    }
+    condition->num_repeats.setNextValue(cEl->getIntAttribute("numRepeats", 1), false);
+    condition->source.setNextValue(cEl->getIntAttribute("sourceIndex", 0), false);
+    condition->pulse_power.setNextValue((float)cEl->getDoubleAttribute("pulsePower", 10.0), false);
+    {
+        const int srcIdx = jlimit(0, 1, condition->source.getSelectedIndex());
+        condition->sites->setChannelCount(sitesPerSource[srcIdx]);
+        String sitesStr = cEl->getStringAttribute("sites", "0");
+        Array<var> siteVals;
+        StringArray siteTok;
+        siteTok.addTokens(sitesStr, ",", "");
+        for (auto& t : siteTok)
+            if (t.isNotEmpty())
+                siteVals.add(t.getIntValue());
+        condition->sites->setNextValue(var(siteVals), false);
+    }
+    XmlElement* sEl = cEl->getChildByName("STIMULUS");
+    if (sEl == nullptr)
+        return;
+    Stimulus* stimulus = nullptr;
+    const String type = sEl->getStringAttribute("type");
+    if (type == "pulse")
+    {
+        auto* pt = new PulseTrain(parent, condition);
+        pt->pulse_width.setNextValue((float)sEl->getDoubleAttribute("pulseWidth", 10.0), false);
+        pt->pulse_frequency.setNextValue((float)sEl->getDoubleAttribute("pulseFrequency", 10.0), false);
+        pt->pulse_count.setNextValue(sEl->getIntAttribute("pulseCount", 1), false);
+        pt->ramp_duration.setNextValue((float)sEl->getDoubleAttribute("rampDuration", 0.0), false);
+        stimulus = pt;
+    }
+    else if (type == "sine")
+    {
+        auto* sw = new SineWave(parent, condition);
+        sw->sine_wave_duration.setNextValue((float)sEl->getDoubleAttribute("sineWaveDuration", 100.0), false);
+        sw->sine_wave_frequency.setNextValue((float)sEl->getDoubleAttribute("sineWaveFrequency", 10.0), false);
+        stimulus = sw;
+    }
+    else if (type == "ramp")
+    {
+        auto* rs = new RampStimulus(parent, condition);
+        rs->plateau_duration.setNextValue((float)sEl->getDoubleAttribute("plateauDuration", 100.0), false);
+        rs->ramp_onset_duration.setNextValue((float)sEl->getDoubleAttribute("rampOnsetDuration", 10.0), false);
+        rs->ramp_offset_duration.setNextValue((float)sEl->getDoubleAttribute("rampOffsetDuration", 10.0), false);
+        rs->ramp_profile.setNextValue(sEl->getIntAttribute("rampProfile", 0), false);
+        stimulus = rs;
+    }
+    else if (type == "custom")
+    {
+        auto* cs = new CustomStimulus(parent, condition);
+        cs->sample_frequency.setNextValue((float)sEl->getDoubleAttribute("sampleFrequency", 10000.0), false);
+        cs->stimulus_waveform.clear();
+        String w = sEl->getStringAttribute("waveform");
+        StringArray vals;
+        vals.addTokens(w, ",", "");
+        for (auto& t : vals)
+            if (t.isNotEmpty())
+                cs->stimulus_waveform.add(t.getFloatValue());
+        stimulus = cs;
+    }
+    if (stimulus == nullptr)
+        return;
+    condition->addStimulus(stimulus);
+    conditionInterfaces.add(new OptoConditionInterface(condition, stimulus, parent));
+    addAndMakeVisible(conditionInterfaces.getLast());
+    int h = 230;
+    for (int i = 0; i < conditionInterfaces.size(); ++i)
+        h += (i == 0 ? conditionInterfaceHeight : 10 + conditionInterfaceHeight);
+    setBounds(0, 0, 0, h);
+}
+
+void OptoProtocolInterface::clearAllSequences()
+{
+    while (!sequenceInterfaces.isEmpty())
+    {
+        OptoSequenceInterface* si = sequenceInterfaces.getLast();
+        Sequence* seq = si->getSequence();
+        sequenceInterfaces.removeObject(si, true);
+        protocol->removeSequence(seq);
+    }
+}
+
+void OptoProtocolInterface::appendProtocolXml(XmlElement* visParent)
+{
+    XmlElement* p = visParent->createNewChildElement("PROTOCOL");
+    p->setAttribute("name", protocol->name);
+    p->setAttribute("description", protocol->description);
+    for (int i = 0; i < sequenceInterfaces.size(); ++i)
+    {
+        Sequence* seq = sequenceInterfaces[i]->getSequence();
+        XmlElement* s = p->createNewChildElement("SEQUENCE");
+        s->setAttribute("name", sequenceInterfaces[i]->getSequenceDisplayName());
+        s->setAttribute("baseline", seq->baseline_interval.getFloatValue());
+        s->setAttribute("minIti", seq->min_iti.getFloatValue());
+        s->setAttribute("maxIti", seq->max_iti.getFloatValue());
+        s->setAttribute("randomize", seq->randomize.getBoolValue() ? 1 : 0);
+        for (auto* cond : seq->conditions)
+            appendConditionXml(s, cond);
+    }
+}
+
+void OptoProtocolInterface::loadProtocolFromXml(XmlElement* protocolElement)
+{
+    if (protocolElement == nullptr)
+        return;
+    protocol->name = protocolElement->getStringAttribute("name", protocol->name);
+    protocol->description = protocolElement->getStringAttribute("description");
+    clearAllSequences();
+    for (auto* seqEl = protocolElement->getFirstChildElement(); seqEl != nullptr; seqEl = seqEl->getNextElement())
+    {
+        if (seqEl->getTagName() != "SEQUENCE")
+            continue;
+        Sequence* seq = new Sequence(this, protocol.get());
+        protocol->addSequence(seq);
+        const String seqName = seqEl->getStringAttribute("name", "Sequence " + String(protocol->sequences.size()));
+        auto* si = new OptoSequenceInterface(seqName, seq, this, true);
+        sequenceInterfaces.add(si);
+        addAndMakeVisible(si);
+        seq->baseline_interval.setNextValue((float)seqEl->getDoubleAttribute("baseline", 0.0), false);
+        seq->min_iti.setNextValue((float)seqEl->getDoubleAttribute("minIti", 1.0), false);
+        seq->max_iti.setNextValue((float)seqEl->getDoubleAttribute("maxIti", 1.0), false);
+        seq->randomize.setNextValue(seqEl->getBoolAttribute("randomize", true), false);
+        for (auto* cEl = seqEl->getFirstChildElement(); cEl != nullptr; cEl = cEl->getNextElement())
+        {
+            if (cEl->getTagName() == "CONDITION")
+                si->importConditionFromXml(cEl);
+        }
+        const int nCond = seq->conditions.size();
+        int h = 230;
+        for (int i = 0; i < nCond; ++i)
+            h += (i == 0 ? OptoSequenceInterface::kConditionInterfaceHeight
+                         : 10 + OptoSequenceInterface::kConditionInterfaceHeight);
+        si->setBounds(0, 0, 0, h);
+    }
+    if (sequenceInterfaces.isEmpty())
+    {
+        Sequence* seq = new Sequence(this, protocol.get());
+        protocol->addSequence(seq);
+        sequenceInterfaces.add(new OptoSequenceInterface("Sequence 1", seq, this, false));
+        addAndMakeVisible(sequenceInterfaces.getLast());
+    }
+    for (auto* si : sequenceInterfaces)
+        si->syncDeleteSequenceVisibility();
+    protocol->createTrials();
+    if (timeline != nullptr)
+    {
+        timeline->reset();
+        timeline->setTotalTime(protocol->getTotalTime());
+        timeline->setTotalTrials(protocol->getTotalTrials());
+    }
+    refreshConditionsTable();
+    updateBounds(0);
+    resized();
+}
+
+void OptoProtocolCanvas::saveCustomParametersToXml(XmlElement* xml)
+{
+    XmlElement* vis = xml->createNewChildElement("VISUALIZER");
+    vis->setAttribute("selectedProtocolId", protocolSelector->getSelectedId());
+    for (auto* pi : protocolInterfaces)
+        pi->appendProtocolXml(vis);
+}
+
+void OptoProtocolCanvas::loadCustomParametersFromXml(XmlElement* xml)
+{
+    XmlElement* visNode = xml->getChildByName("VISUALIZER");
+    if (visNode != nullptr)
+    {
+        const int selectedId = visNode->getIntAttribute("selectedProtocolId", 1);
+        for (auto* pi : protocolInterfaces)
+        {
+            pi->getProtocol()->removeActionListener(protocolTimeline.get());
+            pi->getProtocol()->removeActionListener(this);
+        }
+        viewport->setViewedComponent(nullptr, false);
+        protocolInterfaces.clear(true);
+        protocolSelector->clear(dontSendNotification);
+        int itemId = 1;
+        for (auto* protoEl = visNode->getFirstChildElement(); protoEl != nullptr; protoEl = protoEl->getNextElement())
+        {
+            if (protoEl->getTagName() != "PROTOCOL")
+                continue;
+            auto* iface = new OptoProtocolInterface(protoEl->getStringAttribute("name", "Protocol"), viewport.get());
+            iface->loadProtocolFromXml(protoEl);
+            iface->setTimeline(protocolTimeline.get());
+            protocolInterfaces.add(iface);
+            protocolSelector->addItem(iface->getProtocol()->name, itemId++);
+        }
+        if (protocolInterfaces.isEmpty())
+        {
+            auto* iface = new OptoProtocolInterface("Optotagging 1", viewport.get());
+            iface->setTimeline(protocolTimeline.get());
+            protocolInterfaces.add(iface);
+            protocolSelector->addItem(iface->getProtocol()->name, 1);
+        }
+        viewport->setViewedComponent(protocolInterfaces[0], false);
+        protocolSelector->setSelectedId(selectedId, dontSendNotification);
+        if (protocolSelector->getSelectedId() == 0)
+            protocolSelector->setSelectedId(1, dontSendNotification);
+        const int idx = jlimit(1, protocolInterfaces.size(), protocolSelector->getSelectedId());
+        currentProtocol = protocolInterfaces[idx - 1]->getProtocol();
+        currentProtocol->addActionListener(this);
+        resized();
+    }
 }
 
 

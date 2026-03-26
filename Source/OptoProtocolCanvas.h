@@ -294,10 +294,13 @@ class OptoSequenceInterface : public Component,
 {
 public:
 
+    static constexpr int kConditionInterfaceHeight = 176;
+
     /** Constructor */
     OptoSequenceInterface(const String& name,
                           Sequence* sequence,
-                          OptoProtocolInterface* parent);
+                          OptoProtocolInterface* parent,
+                          bool skipDefaultCondition = false);
     
     /** Destructor */
     ~OptoSequenceInterface();
@@ -322,6 +325,10 @@ public:
     
     /** Returns the Sequence this interface edits (for removal from protocol). */
     Sequence* getSequence() { return sequence; }
+    String getSequenceDisplayName() const;
+    /** Appends one condition + stimulus subtree from XML (used when loading). */
+    void importConditionFromXml(XmlElement* conditionElement);
+    void syncDeleteSequenceVisibility();
     
 private:
     
@@ -339,7 +346,7 @@ private:
     Sequence* sequence;
     OptoProtocolInterface* parent;
     
-    const int conditionInterfaceHeight = 176;
+    const int conditionInterfaceHeight = kConditionInterfaceHeight;
     const int conditionInterfaceWidth = 365;
 
 };
@@ -532,6 +539,10 @@ public:
     /** Number of sequence interfaces (for delete-button visibility). */
     int getNumSequenceInterfaces() const { return sequenceInterfaces.size(); }
     
+    /** Serialize protocol state under a VISUALIZER parent element. */
+    void appendProtocolXml(XmlElement* visualizerParent);
+    /** Replace protocol content from XML (clears existing sequences first). */
+    void loadProtocolFromXml(XmlElement* protocolElement);
     /** Refreshes the conditions table (call when sequences/conditions change). */
     void refreshConditionsTable();
     /** Set the active trial in the table (seqIdx 1-based, trialNum 1-based). */
@@ -540,6 +551,7 @@ public:
     void setTableRunning(bool running);
 private:
     void updateExportTableButtonState();
+    void clearAllSequences();
     
     OwnedArray<OptoSequenceInterface> sequenceInterfaces;
     
@@ -600,6 +612,9 @@ public:
     
     /** Receives a trial update notification */
     void actionListenerCallback(const String& message) override;
+
+    void saveCustomParametersToXml(XmlElement* xml) override;
+    void loadCustomParametersFromXml(XmlElement* xml) override;
 
 private:
 
