@@ -196,6 +196,9 @@ public:
     
     /** Disables the colour selector widget */
     void disable();
+
+    /** Sets 450/638 toggles from condition->availableWavelengths (e.g. after XML load). */
+    void syncFromCondition();
     
 private:
     /** Buttons */

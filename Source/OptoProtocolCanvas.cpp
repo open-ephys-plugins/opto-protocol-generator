@@ -225,6 +225,12 @@ void ColourSelectorWidget::disable()
 
 }
 
+void ColourSelectorWidget::syncFromCondition()
+{
+    redButton->setToggleState(condition->availableWavelengths.contains(638), dontSendNotification);
+    blueButton->setToggleState(condition->availableWavelengths.contains(450), dontSendNotification);
+}
+
 CustomStimulusInterface::CustomStimulusInterface(CustomStimulus* custom_stimulus_,
                                              OptoProtocolInterface* parent_)
     : custom_stimulus(custom_stimulus_), parent(parent_)
@@ -425,6 +431,7 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
     siteEditor = std::make_unique<SelectedChannelsParameterEditor>(condition->sites.get());
     addAndMakeVisible(siteEditor.get());
     colourSelectorWidget = std::make_unique<ColourSelectorWidget>(condition, parent);
+    colourSelectorWidget->syncFromCondition();
     addAndMakeVisible(colourSelectorWidget.get());
     pulsePowerEditor = std::make_unique<BoundedValueParameterEditor>(&condition->pulse_power);
     addAndMakeVisible(pulsePowerEditor.get());
@@ -949,7 +956,7 @@ String ConditionsTableModel::getStartTimeString(int row) const
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
-    float cumul = baseline;
+    float cumul = 0.f;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
@@ -993,7 +1000,7 @@ String ConditionsTableModel::getEndTimeString(int row) const
         if (s == seqIdx) ++pos;
     }
     float baseline = seq->baseline_interval.getFloatValue();
-    float cumul = baseline;
+    float cumul = 0.f;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
@@ -1401,12 +1408,15 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
              ", new value: ", parameter->getValueAsString());
     }
     
-    timeline->reset();
+    if (timeline != nullptr)
+        timeline->reset();
     protocol->reset();
     protocol->createTrials();
-    
-    timeline->setTotalTime(protocol->getTotalTime());
-    timeline->setTotalTrials(protocol->getTotalTrials());
+    if (timeline != nullptr)
+    {
+        timeline->setTotalTime(protocol->getTotalTime());
+        timeline->setTotalTrials(protocol->getTotalTrials());
+    }
     // Defer table refresh so parameter value is committed (fixes single-sequence num_repeats update)
     Timer::callAfterDelay(0, [this]()
     {
@@ -1785,8 +1795,8 @@ void OptoProtocolCanvas::loadCustomParametersFromXml(XmlElement* xml)
             if (protoEl->getTagName() != "PROTOCOL")
                 continue;
             auto* iface = new OptoProtocolInterface(protoEl->getStringAttribute("name", "Protocol"), viewport.get());
-            iface->loadProtocolFromXml(protoEl);
             iface->setTimeline(protocolTimeline.get());
+            iface->loadProtocolFromXml(protoEl);
             protocolInterfaces.add(iface);
             protocolSelector->addItem(iface->getProtocol()->name, itemId++);
         }
