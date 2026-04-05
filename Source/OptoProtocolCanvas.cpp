@@ -36,6 +36,8 @@ namespace
 // Wave-player format (matches nidaq-test.py): sampleRate, maxVoltage, pulse/sine/custom with durations in source samples.
 static const double kSourceSampleRate = 30000.0;
 static const double kMaxVoltage = 5.0;
+/** Pad NIDAQ buffer to this many AO channels so trial-to-trial config does not resize tasks. */
+static const int kNidaqMinAnalogChannels = 2;
 
 static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patternRoot)
 {
@@ -141,6 +143,7 @@ static String trialToNidaqJson(Sequence* seq, int trialIndex)
     root->setProperty("sampleRate", kSourceSampleRate);
     root->setProperty("maxVoltage", kMaxVoltage);
     root->setProperty("playImmediately", true);
+    root->setProperty("minAnalogChannels", kNidaqMinAnalogChannels);
     if (seq->conditions.isEmpty())
         return JSON::toString(var(root.get()));
     seq->createTrials();
