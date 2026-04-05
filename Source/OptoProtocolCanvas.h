@@ -440,6 +440,8 @@ public:
     String exportCsv();
     /** Total duration (s) matching table Start/End columns; use for timeline vs table consistency. */
     float getTotalProtocolDuration();
+    /** Forces rebuildRowOrder on next access (e.g. after reshuffling trials at run). */
+    void invalidateRowOrderCache() { lastStructureSignature.clear(); }
 private:
     void ensureRowOrderCurrent();
     float computeRowBlockDuration(int row) const;
@@ -484,6 +486,7 @@ public:
     String exportTableAsCsv();
     int getNumRows();
     float getTotalProtocolDuration() { return model.getTotalProtocolDuration(); }
+    void invalidateRowOrderCache() { model.invalidateRowOrderCache(); }
 private:
     void resized() override;
     TableListBox table;
@@ -554,6 +557,8 @@ public:
     void loadProtocolFromXml(XmlElement* protocolElement);
     /** Refreshes the conditions table (call when sequences/conditions change). */
     void refreshConditionsTable();
+    /** Clears cached row order so it is rebuilt from Sequence::getTrialBlockOrder() (call after createTrials at run). */
+    void invalidateConditionsTableRowOrder();
     /** Set the active trial in the table (seqIdx 1-based, trialNum 1-based). */
     void setActiveTrial(int seqIdx, int trialNum);
     /** Set whether the protocol is running (table highlights active row when true). */

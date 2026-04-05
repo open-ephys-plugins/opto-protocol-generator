@@ -27,6 +27,9 @@
 
 #include <ProcessorHeaders.h>
 
+#include <tuple>
+#include <vector>
+
 class Protocol;
 class Sequence;
 class Condition;
@@ -299,6 +302,9 @@ public:
     /** Stimulus for trial index (0-based) in execution order; requires createTrials() first. */
     Stimulus* getStimulusForTrial(int trialIndex) const;
 
+    /** (condition, repeat, wavelength, site) 0-based indices; same order as conditions table rows after createTrials(). */
+    const std::vector<std::tuple<int, int, int, int>>& getTrialBlockOrder() const { return trial_block_order; }
+
     /** Baseline interval in seconds (delay before start of stimulation) */
     FloatParameter baseline_interval;
 
@@ -335,6 +341,9 @@ private:
 
     /** Order */
     Array<int> order;
+
+    /** Shuffled block schedule matching ConditionsTableModel row order (excluding baseline rows). */
+    std::vector<std::tuple<int, int, int, int>> trial_block_order;
     
 };
 

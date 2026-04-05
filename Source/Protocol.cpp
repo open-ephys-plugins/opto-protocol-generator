@@ -23,6 +23,8 @@
 
 #include "Protocol.h"
 
+#include <utility>
+
 int Protocol::numProtocolsCreated = 0;
 int Sequence::numSequencesCreated = 0;
 int Condition::numConditionsCreated = 0;
@@ -340,12 +342,13 @@ float Condition::getTotalTime()
 
 int Condition::getTotalTrials() 
 {
-
     int numRepeats = num_repeats.getIntValue();
     int numSites = sites->getArrayValue().size();
-    int numWavelegths = availableWavelengths.size();
-
-    return numRepeats * numSites * numWavelegths;
+    if (numSites == 0) numSites = 1;
+    int numWavelengths = availableWavelengths.size();
+    int nStim = stimuli.size();
+    if (nStim == 0) return 0;
+    return numRepeats * numSites * numWavelengths * nStim;
 }
 
 Sequence::Sequence(ParameterOwner* owner_, Protocol* protocol_)
@@ -430,56 +433,54 @@ void Sequence::createTrials()
     iti_values.clear();
     order.clear();
     stimuli.clear();
+    trial_block_order.clear();
 
-    int trialIndex = 0;
+    std::vector<std::tuple<int, int, int, int>> blocks;
 
-    // Create the trials for each condition
-    for (auto* condition : conditions)
+    for (int c = 0; c < conditions.size(); ++c)
     {
+        Condition* condition = conditions[c];
         int numRepeats = condition->num_repeats.getIntValue();
         int numSites = condition->sites->getArrayValue().size();
-        int numWavelegths = condition->availableWavelengths.size();
+        if (numSites == 0) numSites = 1;
+        int numWavelengths = condition->availableWavelengths.size();
 
         LOGD("Condition ", condition->index, " has ", numRepeats, " repeats and ", numSites, " sites and ", condition->stimuli.size(), " stimuli");
 
         for (int i = 0; i < numRepeats; ++i)
-        {
-            for (int j = 0; j < numSites; ++j)
-            {
-                for (int k = 0; k < numWavelegths; ++k)
-                {
-
-                    for (auto* stimulus : condition->stimuli)
-                    {
-                        // Add the stimulus to the list
-                        stimuli.add(stimulus);
-
-                        // Add the order
-                        order.add(trialIndex++);
-
-                        // Add the ITI value
-                        float minITI = min_iti.getFloatValue();
-                        float maxITI = max_iti.getFloatValue();
-                        float iti = Random::getSystemRandom().nextFloat() * (maxITI - minITI) + minITI;
-                        iti_values.add(iti);
-                    }
-                }
-            }
-        }
+            for (int w = 0; w < numWavelengths; ++w)
+                for (int j = 0; j < numSites; ++j)
+                    blocks.push_back(std::make_tuple(c, i, w, j));
     }
-    
-    LOGD("Created ", trialIndex, " total trials");
 
-    if (randomize.getBoolValue())
+    if (randomize.getBoolValue() && blocks.size() > 1)
     {
-        LOGD("Randomizing trial order...");
-        
-        for (int i = order.size() - 1; i > 0; --i)
+        LOGD("Randomizing trial block order...");
+        auto& rng = Random::getSystemRandom();
+        for (int i = (int)blocks.size() - 1; i > 0; --i)
+            std::swap(blocks[i], blocks[rng.nextInt(i + 1)]);
+    }
+
+    trial_block_order = blocks;
+
+    int trialIndex = 0;
+    for (const auto& b : blocks)
+    {
+        int c = std::get<0>(b);
+        Condition* condition = conditions[c];
+        float minITI = min_iti.getFloatValue();
+        float maxITI = max_iti.getFloatValue();
+
+        for (auto* stimulus : condition->stimuli)
         {
-            int j = Random::getSystemRandom().nextInt(i + 1);
-            order.swap(i, j);
+            stimuli.add(stimulus);
+            order.add(trialIndex++);
+            float iti = Random::getSystemRandom().nextFloat() * (maxITI - minITI) + minITI;
+            iti_values.add(iti);
         }
     }
+
+    LOGD("Created ", trialIndex, " total trials");
 }
 
 Stimulus* Sequence::getStimulusForTrial(int trialIndex) const
@@ -496,10 +497,10 @@ float Sequence::getTrialDuration(int trialIndex)
 {
     if (order.isEmpty() || trialIndex < 0 || trialIndex >= order.size())
         return 0.0f;
-    int nextTrial = order[trialIndex];
-    if (nextTrial < 0 || nextTrial >= stimuli.size() || nextTrial >= iti_values.size())
+    int idx = order[trialIndex];
+    if (idx < 0 || idx >= stimuli.size() || trialIndex >= iti_values.size())
         return 0.0f;
-    return stimuli[nextTrial]->getTotalTime() + iti_values[nextTrial];
+    return stimuli[idx]->getTotalTime() + iti_values[trialIndex];
 }
 
 float Sequence::getTotalTime() 

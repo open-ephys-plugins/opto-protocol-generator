@@ -146,7 +146,6 @@ static String trialToNidaqJson(Sequence* seq, int trialIndex)
     root->setProperty("minAnalogChannels", kNidaqMinAnalogChannels);
     if (seq->conditions.isEmpty())
         return JSON::toString(var(root.get()));
-    seq->createTrials();
     if (trialIndex < 0 || trialIndex >= seq->getTotalTrials())
         return JSON::toString(var(root.get()));
     Stimulus* s = seq->getStimulusForTrial(trialIndex);
@@ -814,35 +813,17 @@ void ConditionsTableModel::rebuildRowOrder()
     for (int s = 0; s < protocol->sequences.size(); ++s)
     {
         Sequence* seq = protocol->sequences[s];
-        Array<std::tuple<int, int, int, int>> condRepeatWlSite;
-        for (int c = 0; c < seq->conditions.size(); ++c)
-        {
-            Condition* cond = seq->conditions[c];
-            int n = cond->num_repeats.getIntValue();
-            int nwl = cond->availableWavelengths.size();
-            int nsite = cond->sites ? cond->sites->getArrayValue().size() : 0;
-            if (nsite == 0) nsite = 1;
-            for (int r = 0; r < n; ++r)
-                for (int w = 0; w < nwl; ++w)
-                    for (int st = 0; st < nsite; ++st)
-                        condRepeatWlSite.add({ c, r, w, st });
-        }
-        auto& rng = Random::getSystemRandom();
-        if (seq->randomize.getBoolValue() && condRepeatWlSite.size() > 1)
-        {
-            for (int i = (int)condRepeatWlSite.size() - 1; i > 0; --i)
-                condRepeatWlSite.swap(i, rng.nextInt(i + 1));
-        }
         const float minITI = seq->min_iti.getFloatValue();
         const float maxITI = seq->max_iti.getFloatValue();
+        auto& rng = Random::getSystemRandom();
         if (seq->baseline_interval.getFloatValue() > 0)
         {
             rowOrder.add(std::make_tuple(s + 1, 0, 0, 0, 0));
             rowIti.add(0.f);
         }
-        for (auto& t : condRepeatWlSite)
+        for (const auto& b : seq->getTrialBlockOrder())
         {
-            rowOrder.add(std::make_tuple(s + 1, std::get<0>(t) + 1, std::get<1>(t) + 1, std::get<2>(t), std::get<3>(t)));
+            rowOrder.add(std::make_tuple(s + 1, std::get<0>(b) + 1, std::get<1>(b) + 1, std::get<2>(b), std::get<3>(b)));
             rowIti.add(sampleNormalItiInRange(minITI, maxITI, rng));
         }
     }
@@ -1067,7 +1048,7 @@ float ConditionsTableModel::computeRowBlockDuration(int row) const
     float stimT = 0.f;
     for (auto* st : cond->stimuli) stimT += st->getTotalTime();
     const float iti = rowIti.getUnchecked(row);
-    return (float)n * (stimT + iti);
+    return stimT + (float)n * iti;
 }
 
 float ConditionsTableModel::getSequenceTableDuration(int seqIdx) const
@@ -1472,6 +1453,12 @@ void OptoProtocolInterface::refreshConditionsTable()
         conditionsTable->refreshTable();
     updateExportTableButtonState();
     updateExportStatusLabel();
+}
+
+void OptoProtocolInterface::invalidateConditionsTableRowOrder()
+{
+    if (conditionsTable)
+        conditionsTable->invalidateRowOrderCache();
 }
 
 float OptoProtocolInterface::getTableTotalDuration()
@@ -2238,6 +2225,12 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
         OptoProtocolInterface* iface = getCurrentInterface();
         if (!protocolTimeline->isRunning)
         {
+            currentProtocol->createTrials();
+            if (iface != nullptr)
+            {
+                iface->invalidateConditionsTableRowOrder();
+                iface->refreshConditionsTable();
+            }
             protocolTimeline->start();
             currentProtocol->run();
             button->setButtonText("Pause");
