@@ -438,7 +438,12 @@ public:
     int getColumnAutoSizeWidth(int columnId) override { return 80; }
     /** Full table as CSV (header + rows); empty if no protocol. */
     String exportCsv();
+    /** Total duration (s) matching table Start/End columns; use for timeline vs table consistency. */
+    float getTotalProtocolDuration();
 private:
+    void ensureRowOrderCurrent();
+    float computeRowBlockDuration(int row) const;
+    float getSequenceTableDuration(int seqIdx) const;
     String getCellText(int rowNumber, int columnId) const;
     void rebuildRowOrder();
     String getStructureSignature() const;
@@ -478,6 +483,7 @@ public:
     void setRunning(bool running);
     String exportTableAsCsv();
     int getNumRows();
+    float getTotalProtocolDuration() { return model.getTotalProtocolDuration(); }
 private:
     void resized() override;
     TableListBox table;
@@ -552,6 +558,8 @@ public:
     void setActiveTrial(int seqIdx, int trialNum);
     /** Set whether the protocol is running (table highlights active row when true). */
     void setTableRunning(bool running);
+    /** Total protocol duration matching the conditions table (timeline should use this). */
+    float getTableTotalDuration();
 private:
     void updateExportTableButtonState();
     void updateExportStatusLabel();

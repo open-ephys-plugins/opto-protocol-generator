@@ -771,9 +771,9 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         setBounds(0, 0, 0, 230 + (10 + conditionInterfaceHeight) * numInterfaces);
         parent->resized();
         parent->updateBounds(conditionInterfaceHeight - 20);
-        parent->timeline->setTotalTime(sequence->protocol->getTotalTime());
-        parent->timeline->setTotalTrials(sequence->protocol->getTotalTrials());
         parent->refreshConditionsTable();
+        parent->timeline->setTotalTime(parent->getTableTotalDuration());
+        parent->timeline->setTotalTrials(sequence->protocol->getTotalTrials());
     }
 }
 
@@ -945,9 +945,9 @@ String ConditionsTableModel::getStartTimeString(int row) const
     int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
     rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
-    float timeBeforeSeq = 0;
-    for (int s = 0; s < seqIdx - 1; ++s)
-        timeBeforeSeq += protocol->sequences[s]->getTotalTime();
+    float timeBeforeSeq = 0.f;
+    for (int s = 1; s < seqIdx; ++s)
+        timeBeforeSeq += getSequenceTableDuration(s);
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
@@ -955,7 +955,7 @@ String ConditionsTableModel::getStartTimeString(int row) const
         rowToIndices(r, s, c, p, w, st);
         if (s == seqIdx) ++pos;
     }
-    float baseline = seq->baseline_interval.getFloatValue();
+    const float baseline = seq->baseline_interval.getFloatValue();
     float cumul = 0.f;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
@@ -963,20 +963,9 @@ String ConditionsTableModel::getStartTimeString(int row) const
         int s, c, p, w, st;
         rowToIndices(r, s, c, p, w, st);
         if (s != seqIdx) continue;
-        float blockDur;
-        if (c == 0)
-            blockDur = baseline;
-        else
-        {
-            Condition* cond = seq->conditions[c - 1];
-            int n = (int)cond->stimuli.size();
-            float stimT = 0;
-            for (auto* st : cond->stimuli) stimT += st->getTotalTime();
-            const float iti = rowIti.getUnchecked(r);
-            blockDur = (float)n * (stimT + iti);
-        }
+        const float blockDur = computeRowBlockDuration(r);
         if (idx == pos)
-            return String(formatTimeSec(timeBeforeSeq + (c == 0 ? 0 : cumul))) + "s";
+            return String(formatTimeSec(timeBeforeSeq + (c == 0 ? 0.f : cumul))) + "s";
         cumul += blockDur;
         ++idx;
     }
@@ -989,9 +978,9 @@ String ConditionsTableModel::getEndTimeString(int row) const
     int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
     rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
-    float timeBeforeSeq = 0;
-    for (int s = 0; s < seqIdx - 1; ++s)
-        timeBeforeSeq += protocol->sequences[s]->getTotalTime();
+    float timeBeforeSeq = 0.f;
+    for (int s = 1; s < seqIdx; ++s)
+        timeBeforeSeq += getSequenceTableDuration(s);
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
@@ -999,7 +988,7 @@ String ConditionsTableModel::getEndTimeString(int row) const
         rowToIndices(r, s, c, p, w, st);
         if (s == seqIdx) ++pos;
     }
-    float baseline = seq->baseline_interval.getFloatValue();
+    const float baseline = seq->baseline_interval.getFloatValue();
     float cumul = 0.f;
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
@@ -1007,18 +996,7 @@ String ConditionsTableModel::getEndTimeString(int row) const
         int s, c, p, w, st;
         rowToIndices(r, s, c, p, w, st);
         if (s != seqIdx) continue;
-        float blockDur;
-        if (c == 0)
-            blockDur = baseline;
-        else
-        {
-            Condition* cond = seq->conditions[c - 1];
-            int n = (int)cond->stimuli.size();
-            float stimT = 0;
-            for (auto* st : cond->stimuli) stimT += st->getTotalTime();
-            const float iti = rowIti.getUnchecked(r);
-            blockDur = (float)n * (stimT + iti);
-        }
+        const float blockDur = computeRowBlockDuration(r);
         if (idx == pos)
             return String(formatTimeSec(timeBeforeSeq + (c == 0 ? baseline : cumul + blockDur))) + "s";
         cumul += blockDur;
@@ -1054,16 +1032,61 @@ int ConditionsTableModel::getRowIndexForSequenceAndTrial(int seqIdx, int trialNu
     return -1;
 }
 
-int ConditionsTableModel::getNumRows()
+void ConditionsTableModel::ensureRowOrderCurrent()
 {
-    if (!protocol) return 0;
+    if (!protocol) return;
     String sig = getStructureSignature();
     if (sig != lastStructureSignature)
     {
         lastStructureSignature = sig;
         rebuildRowOrder();
     }
+}
+
+int ConditionsTableModel::getNumRows()
+{
+    if (!protocol) return 0;
+    ensureRowOrderCurrent();
     return rowOrder.size();
+}
+
+float ConditionsTableModel::computeRowBlockDuration(int row) const
+{
+    if (!protocol || row < 0 || row >= rowOrder.size()) return 0.f;
+    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    Sequence* seq = protocol->sequences[seqIdx - 1];
+    const float baseline = seq->baseline_interval.getFloatValue();
+    if (condIdx == 0)
+        return baseline;
+    Condition* cond = seq->conditions[condIdx - 1];
+    const int n = (int)cond->stimuli.size();
+    float stimT = 0.f;
+    for (auto* st : cond->stimuli) stimT += st->getTotalTime();
+    const float iti = rowIti.getUnchecked(row);
+    return (float)n * (stimT + iti);
+}
+
+float ConditionsTableModel::getSequenceTableDuration(int seqIdx) const
+{
+    float sum = 0.f;
+    for (int r = 0; r < rowOrder.size(); ++r)
+    {
+        if (std::get<0>(rowOrder[r]) != seqIdx)
+            continue;
+        sum += computeRowBlockDuration(r);
+    }
+    return sum;
+}
+
+float ConditionsTableModel::getTotalProtocolDuration()
+{
+    if (!protocol) return 0.f;
+    ensureRowOrderCurrent();
+    float total = 0.f;
+    for (int r = 0; r < rowOrder.size(); ++r)
+        total += computeRowBlockDuration(r);
+    return total;
 }
 
 void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected)
@@ -1363,9 +1386,9 @@ void OptoProtocolInterface::buttonClicked(Button* button)
        
         updateBounds(sequenceInterfaces.getLast()->getHeight());
         
-        timeline->setTotalTime(protocol->getTotalTime());
-        timeline->setTotalTrials(protocol->getTotalTrials());
         refreshConditionsTable();
+        timeline->setTotalTime(getTableTotalDuration());
+        timeline->setTotalTrials(protocol->getTotalTrials());
     }
 }
 
@@ -1374,6 +1397,11 @@ void OptoProtocolInterface::removeConditionInterface(OptoConditionInterface* con
     for (auto seq : sequenceInterfaces)
         seq->removeCondition(conditionInterface);
     refreshConditionsTable();
+    if (timeline != nullptr)
+    {
+        timeline->setTotalTime(getTableTotalDuration());
+        timeline->setTotalTrials(protocol->getTotalTrials());
+    }
     updateBounds(0);
 }
 
@@ -1386,11 +1414,11 @@ void OptoProtocolInterface::removeSequenceInterface(OptoSequenceInterface* seque
     Sequence* seq = sequenceInterface->getSequence();
     sequenceInterfaces.removeObject(sequenceInterface, true);
     protocol->removeSequence(seq);
-    timeline->setTotalTime(protocol->getTotalTime());
+    refreshConditionsTable();
+    timeline->setTotalTime(getTableTotalDuration());
     timeline->setTotalTrials(protocol->getTotalTrials());
     updateBounds(0);
     resized();
-    refreshConditionsTable();
     for (auto* si : sequenceInterfaces)
         si->enable();
 }
@@ -1412,15 +1440,14 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
         timeline->reset();
     protocol->reset();
     protocol->createTrials();
+    refreshConditionsTable();
     if (timeline != nullptr)
     {
-        timeline->setTotalTime(protocol->getTotalTime());
+        timeline->setTotalTime(getTableTotalDuration());
         timeline->setTotalTrials(protocol->getTotalTrials());
     }
-    // Defer table refresh so parameter value is committed (fixes single-sequence num_repeats update)
     Timer::callAfterDelay(0, [this]()
     {
-        refreshConditionsTable();
         updateBounds(0);
         resized();
     });
@@ -1430,7 +1457,8 @@ void OptoProtocolInterface::setTimeline(ProtocolTimeline* timeline_)
 {
     timeline = timeline_;
     
-    timeline->setTotalTime(protocol->getTotalTime());
+    refreshConditionsTable();
+    timeline->setTotalTime(getTableTotalDuration());
     timeline->setTotalTrials(protocol->getTotalTrials());
     protocol->addActionListener(timeline);
 }
@@ -1441,6 +1469,12 @@ void OptoProtocolInterface::refreshConditionsTable()
         conditionsTable->refreshTable();
     updateExportTableButtonState();
     updateExportStatusLabel();
+}
+
+float OptoProtocolInterface::getTableTotalDuration()
+{
+    if (!conditionsTable) return protocol->getTotalTime();
+    return conditionsTable->getTotalProtocolDuration();
 }
 
 void OptoProtocolInterface::updateExportTableButtonState()
@@ -1753,15 +1787,15 @@ void OptoProtocolInterface::loadProtocolFromXml(XmlElement* protocolElement)
     for (auto* si : sequenceInterfaces)
         si->syncDeleteSequenceVisibility();
     protocol->createTrials();
-    if (timeline != nullptr)
-    {
-        timeline->reset();
-        timeline->setTotalTime(protocol->getTotalTime());
-        timeline->setTotalTrials(protocol->getTotalTrials());
-    }
     lastExportedCsvSnapshot.clear();
     lastSavedTimestampDisplay.clear();
     refreshConditionsTable();
+    if (timeline != nullptr)
+    {
+        timeline->reset();
+        timeline->setTotalTime(getTableTotalDuration());
+        timeline->setTotalTrials(protocol->getTotalTrials());
+    }
     updateBounds(0);
     resized();
 }
@@ -1845,8 +1879,9 @@ void OptoProtocolCanvas::applySelectedProtocol()
     currentProtocol = iface->getProtocol();
     currentProtocol->addActionListener(this);
 
+    iface->refreshConditionsTable();
     protocolTimeline->reset();
-    protocolTimeline->setTotalTime(currentProtocol->getTotalTime());
+    protocolTimeline->setTotalTime(iface->getTableTotalDuration());
     protocolTimeline->setTotalTrials(currentProtocol->getTotalTrials());
 
     iface->setTableRunning(false);
