@@ -1455,12 +1455,6 @@ void OptoProtocolInterface::refreshConditionsTable()
     updateExportStatusLabel();
 }
 
-void OptoProtocolInterface::invalidateConditionsTableRowOrder()
-{
-    if (conditionsTable)
-        conditionsTable->invalidateRowOrderCache();
-}
-
 float OptoProtocolInterface::getTableTotalDuration()
 {
     if (!conditionsTable) return protocol->getTotalTime();
@@ -2225,12 +2219,6 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
         OptoProtocolInterface* iface = getCurrentInterface();
         if (!protocolTimeline->isRunning)
         {
-            currentProtocol->createTrials();
-            if (iface != nullptr)
-            {
-                iface->invalidateConditionsTableRowOrder();
-                iface->refreshConditionsTable();
-            }
             protocolTimeline->start();
             currentProtocol->run();
             button->setButtonText("Pause");
@@ -2247,13 +2235,20 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
     } else if (button == resetButton.get())
     {
         OptoProtocolInterface* iface = getCurrentInterface();
+        if (protocolTimeline->isRunning)
+        {
+            protocolTimeline->pause();
+            currentProtocol->pause();
+        }
+        runButton->setButtonText("Run");
         protocolTimeline->reset();
         currentProtocol->reset();
         if (iface != nullptr)
+        {
             iface->setTableRunning(false);
-        runButton->setEnabled(true);
-        if (iface != nullptr)
             iface->enable();
+        }
+        runButton->setEnabled(true);
     }
 }
 
