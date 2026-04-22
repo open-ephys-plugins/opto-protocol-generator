@@ -34,6 +34,7 @@ class Protocol;
 class Sequence;
 class Condition;
 class Stimulus;
+class OptoHardwareConfig;
 
 /** Available stimulus types*/
 enum StimulusType
@@ -255,7 +256,13 @@ public:
 
     /** Remove a light wavelength */
     void removeWavelength(int wavelength);
-    
+
+    /** Apply device names / sites from hardware JSON (non-null, non-empty cfg). */
+    void applyHardwareCatalog(const OptoHardwareConfig* cfg);
+
+    /** Update sites channel count and prune invalid wavelengths for the current source index. */
+    void refreshForSelectedSource(const OptoHardwareConfig* cfg);
+
 private:
 
     /** Generate a unique parameter key */

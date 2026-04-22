@@ -1,0 +1,70 @@
+{
+    "devices": [
+        {
+            "name": "Probe A",
+            "is_np_opto": true,
+            "light_sources": [
+                {
+                    "name": "Red Laser",
+                    "wavelength": 638,
+                    "output_channel": 0,
+                    "input_voltages": [
+                        0.0,
+                        1.0,
+                        2.0,
+                        3.0
+                    ],
+                    "output_powers": [
+                        0.0,
+                        10.0,
+                        20.0,
+                        30.0
+                    ],
+                    "output_units": "uW"
+                },
+                {
+                    "name": "Blue Laser",
+                    "wavelength": 450,
+                    "output_channel": 1,
+                    "input_voltages": [
+                        0.0,
+                        1.0,
+                        2.0,
+                        3.0
+                    ],
+                    "output_powers": [
+                        0.0,
+                        5.0,
+                        15.0,
+                        25.0
+                    ],
+                    "output_units": "uW"
+                }
+            ]
+        },
+        {
+            "name": "Internal Laser",
+            "is_np_opto": false,
+            "light_sources": [
+                {
+                    "name": "Yellow Laser",
+                    "wavelength": 580,
+                    "output_channel": 2,
+                    "input_voltages": [
+                        0.0,
+                        1.0,
+                        2.0,
+                        3.0
+                    ],
+                    "output_powers": [
+                        0.0,
+                        8.0,
+                        16.0,
+                        24.0
+                    ],
+                    "output_units": "mW"
+                }
+            ]
+        }
+    ]
+}

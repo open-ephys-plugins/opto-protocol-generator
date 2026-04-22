@@ -29,8 +29,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <utility>
 using namespace juce;
 
-#define SITES_PER_SOURCE 2
-
 namespace
 {
 // Wave-player format (matches nidaq-test.py): sampleRate, maxVoltage, pulse/sine/custom with durations in source samples.
@@ -39,10 +37,55 @@ static const double kMaxVoltage = 5.0;
 /** Pad NIDAQ buffer to this many AO channels so trial-to-trial config does not resize tasks. */
 static const int kNidaqMinAnalogChannels = 2;
 
-static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patternRoot)
+static bool trialIndexToWavelengthNm(Sequence* seq, int trialIndex, int& outWl)
 {
-    // 5V for testing; scale by power when needed: (c->pulse_power.getFloatValue() / 10000.0f)
-    const float v = (float)kMaxVoltage;
+    int t = 0;
+    const auto& blocks = seq->getTrialBlockOrder();
+    for (size_t bi = 0; bi < blocks.size(); ++bi)
+    {
+        const int c = std::get<0>(blocks[bi]);
+        const int nStim = jmax(1, seq->conditions[c]->stimuli.size());
+        if (trialIndex < t + nStim)
+        {
+            const int widx = std::get<2>(blocks[bi]);
+            Condition* cond = seq->conditions[c];
+            if (widx >= 0 && widx < cond->availableWavelengths.size())
+                outWl = cond->availableWavelengths[widx];
+            else
+                outWl = 0;
+            return true;
+        }
+        t += nStim;
+    }
+    return false;
+}
+
+static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patternRoot,
+                                 const OptoHardwareConfig* hw, int wavelengthNm)
+{
+    int analogChannel = 0;
+    float maxVoltage = (float) kMaxVoltage;
+    const OptoHardwareLightSource* ls = nullptr;
+    if (hw != nullptr && !hw->isEmpty())
+    {
+        const int di = jlimit(0, hw->devices.size() - 1, c->source.getSelectedIndex());
+        ls = hw->findLightSource(di, wavelengthNm);
+        if (ls != nullptr)
+        {
+            analogChannel = ls->outputChannel;
+            maxVoltage = OptoHardwareConfig::mapPowerToControlVoltage(c->pulse_power.getFloatValue(), *ls);
+        }
+    }
+
+    if (hw == nullptr || ls == nullptr)
+    {
+        if (s->type == PULSE_TRAIN || s->type == RAMP)
+            analogChannel = 0;
+        else
+            analogChannel = 1;
+        maxVoltage = (float) kMaxVoltage;
+    }
+
     if (s->type == PULSE_TRAIN)
     {
         PulseTrain* pt = static_cast<PulseTrain*>(s);
@@ -55,7 +98,7 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
         int offDuration = periodSamples - onDuration;
         if (offDuration < 1) offDuration = 1;
         DynamicObject::Ptr pulse = new DynamicObject();
-        pulse->setProperty("analogOutputChannel", 0);
+        pulse->setProperty("analogOutputChannel", analogChannel);
         pulse->setProperty("onDuration", onDuration);
         pulse->setProperty("offDuration", offDuration);
         pulse->setProperty("delayDuration", 0);
@@ -63,7 +106,7 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
         int rampSamples = (int)(pt->ramp_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
         pulse->setProperty("rampOnDuration", rampSamples);
         pulse->setProperty("rampOffDuration", rampSamples);
-        pulse->setProperty("maxVoltage", v);
+        pulse->setProperty("maxVoltage", maxVoltage);
         patternRoot->setProperty("pulse", var(pulse.get()));
     }
     else if (s->type == SINUSOID)
@@ -73,11 +116,11 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
         float freqHz = sw->sine_wave_frequency.getFloatValue();
         int cycles = jmax(1, (int)(durMs / 1000.0f * freqHz + 0.5f));
         DynamicObject::Ptr sine = new DynamicObject();
-        sine->setProperty("analogOutputChannel", 1);
+        sine->setProperty("analogOutputChannel", analogChannel);
         sine->setProperty("frequency", (double)freqHz);
         sine->setProperty("cycles", cycles);
         sine->setProperty("delayDuration", 0);
-        sine->setProperty("maxVoltage", v);
+        sine->setProperty("maxVoltage", maxVoltage);
         patternRoot->setProperty("sine", var(sine.get()));
     }
     else if (s->type == RAMP)
@@ -88,14 +131,14 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
         int rampOn = (int)(rs->ramp_onset_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
         int rampOff = (int)(rs->ramp_offset_duration.getFloatValue() / 1000.0f * kSourceSampleRate);
         DynamicObject::Ptr pulse = new DynamicObject();
-        pulse->setProperty("analogOutputChannel", 0);
+        pulse->setProperty("analogOutputChannel", analogChannel);
         pulse->setProperty("onDuration", jmax(1, totalSamples));
         pulse->setProperty("offDuration", 1);
         pulse->setProperty("delayDuration", 0);
         pulse->setProperty("repeatNumber", 1);
         pulse->setProperty("rampOnDuration", rampOn);
         pulse->setProperty("rampOffDuration", rampOff);
-        pulse->setProperty("maxVoltage", v);
+        pulse->setProperty("maxVoltage", maxVoltage);
         patternRoot->setProperty("pulse", var(pulse.get()));
     }
     else if (s->type == CUSTOM)
@@ -104,14 +147,15 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
         if (cs->stimulus_waveform.size() > 0)
         {
             String str;
+            const float scale = maxVoltage > 0 ? (maxVoltage / (float) kMaxVoltage) : 1.f;
             for (int i = 0; i < cs->stimulus_waveform.size(); i++)
             {
                 if (i > 0) str << ",";
-                float val = jmax(0.0f, jmin(1.0f, cs->stimulus_waveform[i])) * (float)kMaxVoltage;
+                float val = jmax(0.0f, jmin(1.0f, cs->stimulus_waveform[i])) * (float) kMaxVoltage * scale;
                 str << val;
             }
             DynamicObject::Ptr custom = new DynamicObject();
-            custom->setProperty("analogOutputChannel", 1);
+            custom->setProperty("analogOutputChannel", analogChannel);
             custom->setProperty("string", str);
             patternRoot->setProperty("custom", var(custom.get()));
         }
@@ -137,13 +181,16 @@ static float sampleNormalItiInRange(float lo, float hi, Random& rng)
 }
 
 /** Builds NIDAQ JSON for a single trial (one row); send at start of that trial. */
-static String trialToNidaqJson(Sequence* seq, int trialIndex)
+static String trialToNidaqJson(Sequence* seq, int trialIndex, const OptoHardwareConfig* hw)
 {
     DynamicObject::Ptr root = new DynamicObject();
     root->setProperty("sampleRate", kSourceSampleRate);
     root->setProperty("maxVoltage", kMaxVoltage);
     root->setProperty("playImmediately", true);
-    root->setProperty("minAnalogChannels", kNidaqMinAnalogChannels);
+    int minCh = kNidaqMinAnalogChannels;
+    if (hw != nullptr && !hw->isEmpty())
+        minCh = jmax(minCh, hw->maxAnalogOutputChannel() + 1);
+    root->setProperty("minAnalogChannels", minCh);
     if (seq->conditions.isEmpty())
         return JSON::toString(var(root.get()));
     if (trialIndex < 0 || trialIndex >= seq->getTotalTrials())
@@ -151,7 +198,10 @@ static String trialToNidaqJson(Sequence* seq, int trialIndex)
     Stimulus* s = seq->getStimulusForTrial(trialIndex);
     if (!s || !s->condition)
         return JSON::toString(var(root.get()));
-    addStimulusToPattern(s, s->condition, root.get());
+    int wlNm = 638;
+    if (!trialIndexToWavelengthNm(seq, trialIndex, wlNm))
+        wlNm = 638;
+    addStimulusToPattern(s, s->condition, root.get(), hw, wlNm);
     return JSON::toString(var(root.get()));
 }
 }
@@ -159,78 +209,140 @@ static String trialToNidaqJson(Sequence* seq, int trialIndex)
 ColourSelectorWidget::ColourSelectorWidget(Condition* condition_, OptoProtocolInterface* parent_)
     : condition(condition_), parent(parent_)
 {
-    redButton = std::make_unique<TextButton>("redButton");
-    redButton->setButtonText("638");
-    redButton->setClickingTogglesState(true);
-    redButton->setToggleState(true, dontSendNotification);
-    redButton->setColour(TextButton::buttonColourId, Colours::darkgrey);
-    redButton->setColour(TextButton::buttonOnColourId, Colours::red);
-    redButton->setColour(TextButton::textColourOnId, Colours::white);
-    redButton->setColour(TextButton::textColourOffId, Colours::white);
-    redButton->addListener(this);
-    addAndMakeVisible(redButton.get());
-    redButton->setBounds(46, 0, 40, 20);
-    
-    blueButton = std::make_unique<TextButton>("blueButton");
-    blueButton->setButtonText("450");
-    blueButton->setClickingTogglesState(true);
-    blueButton->setToggleState(false, dontSendNotification);
-    blueButton->setColour(TextButton::buttonColourId, Colours::darkgrey);
-    blueButton->setColour(TextButton::buttonOnColourId, Colour(38, 173, 252));
-    blueButton->setColour(TextButton::textColourOnId, Colours::white);
-    blueButton->setColour(TextButton::textColourOffId, Colours::white);
-    blueButton->addListener(this);
-    addAndMakeVisible(blueButton.get());
-    blueButton->setBounds(0, 0, 40, 20);
-    
     wavelengthLabel = std::make_unique<Label>("wavelengthLabel", "Wavelength");
     wavelengthLabel->setFont(FontOptions ("Inter", "Regular", 13.5));
     wavelengthLabel->setJustificationType(Justification::centredLeft);
     addAndMakeVisible(wavelengthLabel.get());
     wavelengthLabel->setBounds(90, 0, 100, 20);
-    
+    rebuildFromConfig();
+}
+
+void ColourSelectorWidget::rebuildFromConfig()
+{
+    for (auto& b : wavelengthButtons)
+    {
+        b->removeListener(this);
+        removeChildComponent(b.get());
+    }
+    wavelengthButtons.clear();
+    buttonWavelengths.clear();
+
+    const auto* hw = parent != nullptr ? parent->getHardwareConfig() : nullptr;
+    if (hw == nullptr || hw->isEmpty())
+        return;
+
+    const int di = jlimit(0, hw->devices.size() - 1, condition->source.getSelectedIndex());
+    const auto& dev = hw->devices.getReference(di);
+
+    int idx450 = -1, idx638 = -1;
+    for (int i = 0; i < dev.lightSources.size(); ++i)
+    {
+        const int w = dev.lightSources.getReference(i).wavelength;
+        if (w == 450) idx450 = i;
+        if (w == 638) idx638 = i;
+    }
+
+    if (dev.is_np_opto && idx450 >= 0 && idx638 >= 0)
+        layoutNpOptoStyle();
+    else
+        layoutLinearButtons();
+}
+
+void ColourSelectorWidget::layoutNpOptoStyle()
+{
+    auto makeBtn = [this](int wl, bool onLeft)
+    {
+        auto b = std::make_unique<TextButton>("wl_" + String(wl));
+        b->setButtonText(String(wl));
+        b->setClickingTogglesState(true);
+        b->setColour(TextButton::buttonColourId, Colours::darkgrey);
+        if (wl == 450)
+            b->setColour(TextButton::buttonOnColourId, Colour(38, 173, 252));
+        else if (wl == 638)
+            b->setColour(TextButton::buttonOnColourId, Colours::red);
+        else
+            b->setColour(TextButton::buttonOnColourId, Colours::green);
+        b->setColour(TextButton::textColourOnId, Colours::white);
+        b->setColour(TextButton::textColourOffId, Colours::white);
+        b->addListener(this);
+        addAndMakeVisible(*b);
+        b->setBounds(onLeft ? 0 : 46, 0, 40, 20);
+        wavelengthButtons.push_back(std::move(b));
+        buttonWavelengths.push_back(wl);
+    };
+
+    makeBtn(450, true);
+    makeBtn(638, false);
+}
+
+void ColourSelectorWidget::layoutLinearButtons()
+{
+    const auto* hw = parent->getHardwareConfig();
+    const int di = jlimit(0, hw->devices.size() - 1, condition->source.getSelectedIndex());
+    const auto& dev = hw->devices.getReference(di);
+    int x = 0;
+    for (const auto& ls : dev.lightSources)
+    {
+        const int wl = ls.wavelength;
+        auto b = std::make_unique<TextButton>("wl_" + String(wl));
+        b->setButtonText(String(wl));
+        b->setClickingTogglesState(true);
+        b->setColour(TextButton::buttonColourId, Colours::darkgrey);
+        if (wl == 450)
+            b->setColour(TextButton::buttonOnColourId, Colour(38, 173, 252));
+        else if (wl == 638)
+            b->setColour(TextButton::buttonOnColourId, Colours::red);
+        else if (wl == 520)
+            b->setColour(TextButton::buttonOnColourId, Colours::green);
+        else
+            b->setColour(TextButton::buttonOnColourId, Colours::grey);
+        b->setColour(TextButton::textColourOnId, Colours::white);
+        b->setColour(TextButton::textColourOffId, Colours::white);
+        b->addListener(this);
+        addAndMakeVisible(*b);
+        b->setBounds(x, 0, 40, 20);
+        x += 46;
+        wavelengthButtons.push_back(std::move(b));
+        buttonWavelengths.push_back(wl);
+    }
 }
 
 void ColourSelectorWidget::buttonClicked(Button* button)
 {
-    if (redButton->getToggleState())
+    for (size_t i = 0; i < wavelengthButtons.size(); ++i)
     {
-        condition->addWavelength(638);
-    } else {
-        condition->removeWavelength(638);
+        if (wavelengthButtons[i].get() == button)
+        {
+            const int wl = buttonWavelengths[i];
+            if (wavelengthButtons[i]->getToggleState())
+                condition->addWavelength(wl);
+            else
+                condition->removeWavelength(wl);
+            parent->parameterChangeRequest(nullptr);
+            return;
+        }
     }
-        
-    if (blueButton->getToggleState())
-    {
-        condition->addWavelength(450);
-    } else {
-        condition->removeWavelength(450);
-    }
-    parent->parameterChangeRequest(nullptr);
-    
 }
-
 
 void ColourSelectorWidget::enable()
 {
-    redButton->setEnabled(true);
-    blueButton->setEnabled(true);
+    for (auto& b : wavelengthButtons)
+        b->setEnabled(true);
     wavelengthLabel->setEnabled(true);
-
 }
 
 void ColourSelectorWidget::disable()
 {
-    redButton->setEnabled(false);
-    blueButton->setEnabled(false);
+    for (auto& b : wavelengthButtons)
+        b->setEnabled(false);
     wavelengthLabel->setEnabled(false);
-
 }
 
 void ColourSelectorWidget::syncFromCondition()
 {
-    redButton->setToggleState(condition->availableWavelengths.contains(638), dontSendNotification);
-    blueButton->setToggleState(condition->availableWavelengths.contains(450), dontSendNotification);
+    for (size_t i = 0; i < wavelengthButtons.size(); ++i)
+        wavelengthButtons[i]->setToggleState(condition->availableWavelengths.contains(buttonWavelengths[i]),
+                                             dontSendNotification);
 }
 
 CustomStimulusInterface::CustomStimulusInterface(CustomStimulus* custom_stimulus_,
@@ -430,9 +542,18 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
     
     sourceEditor = std::make_unique<ComboBoxParameterEditor>(&condition->source);
     addAndMakeVisible(sourceEditor.get());
+    loadJsonButton = std::make_unique<TextButton>("loadJson");
+    loadJsonButton->setButtonText("Load Sources");
+    loadJsonButton->onClick = [this]()
+    {
+        if (parent != nullptr)
+            parent->launchLoadHardwareJsonChooser();
+    };
+    addAndMakeVisible(loadJsonButton.get());
     siteEditor = std::make_unique<SelectedChannelsParameterEditor>(condition->sites.get());
     addAndMakeVisible(siteEditor.get());
     colourSelectorWidget = std::make_unique<ColourSelectorWidget>(condition, parent);
+    colourSelectorWidget->rebuildFromConfig();
     colourSelectorWidget->syncFromCondition();
     addAndMakeVisible(colourSelectorWidget.get());
     pulsePowerEditor = std::make_unique<BoundedValueParameterEditor>(&condition->pulse_power);
@@ -470,17 +591,70 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
     addAndMakeVisible(deleteButton.get());
     
     setBounds(0, 0, 0, 400);
+    refreshSourceLoadUi();
 }
     
 
 OptoConditionInterface::~OptoConditionInterface()
 {
 }
+
+void OptoConditionInterface::refreshSourceLoadUi()
+{
+    const bool hw = parent != nullptr && parent->hasHardwareConfig();
+    if (sourceEditor != nullptr)
+    {
+        sourceEditor->setVisible(hw);
+        sourceEditor->setInterceptsMouseClicks(hw, hw);
+    }
+    if (loadJsonButton != nullptr)
+    {
+        loadJsonButton->setVisible(!hw);
+        loadJsonButton->setInterceptsMouseClicks(!hw, !hw);
+    }
+    if (siteEditor != nullptr)
+    {
+        siteEditor->setVisible(hw);
+        siteEditor->setInterceptsMouseClicks(hw, hw);
+    }
+    if (colourSelectorWidget != nullptr)
+    {
+        colourSelectorWidget->setVisible(hw);
+        colourSelectorWidget->setInterceptsMouseClicks(hw, hw);
+    }
+    if (pulsePowerEditor != nullptr)
+    {
+        pulsePowerEditor->setVisible(hw);
+        pulsePowerEditor->setInterceptsMouseClicks(hw, hw);
+    }
+}
+
+void OptoConditionInterface::onHardwareConfigChanged()
+{
+    refreshSourceLoadUi();
+    // CategoricalParameter::setCategories() does not notify listeners when the
+    // selected index stays in range, so the ComboBox keeps stale/empty item text.
+    if (parent != nullptr && parent->hasHardwareConfig())
+    {
+        if (sourceEditor != nullptr)
+            sourceEditor->updateView();
+        if (siteEditor != nullptr)
+            siteEditor->updateView();
+    }
+    if (colourSelectorWidget != nullptr)
+    {
+        colourSelectorWidget->rebuildFromConfig();
+        colourSelectorWidget->syncFromCondition();
+    }
+    resized();
+}
     
 void OptoConditionInterface::resized()
 {
     stimulusTypeLabel->setBounds(12, 12, 100, 20);
     sourceEditor->setBounds(190, 15, 180, 20);
+    if (loadJsonButton != nullptr)
+        loadJsonButton->setBounds(190, 15, 112, 20);
     colourSelectorWidget->setBounds(15, 50, 180, 20);
     siteEditor->setBounds(15, 80, 150, 20);
     pulsePowerEditor->setBounds(15, 110, 150, 20);
@@ -509,12 +683,18 @@ void OptoConditionInterface::requestDelete()
 
 void OptoConditionInterface::enable()
 {
-    sourceEditor->parameterEnabled(true);
-    siteEditor->parameterEnabled(true);
-    pulsePowerEditor->parameterEnabled(true);
+    const bool hw = parent != nullptr && parent->hasHardwareConfig();
+    sourceEditor->parameterEnabled(hw);
+    if (loadJsonButton != nullptr)
+        loadJsonButton->setEnabled(!hw);
+    siteEditor->parameterEnabled(hw);
+    pulsePowerEditor->parameterEnabled(hw);
     numRepeatsEditor->parameterEnabled(true);
     
-    colourSelectorWidget->enable();
+    if (hw)
+        colourSelectorWidget->enable();
+    else
+        colourSelectorWidget->disable();
     
     if (pulseTrainInterface.get() != nullptr)
         pulseTrainInterface->enable();
@@ -532,6 +712,8 @@ void OptoConditionInterface::disable()
     LOGD("Disabling OptoConditionInterface");
     
     sourceEditor->parameterEnabled(false);
+    if (loadJsonButton != nullptr)
+        loadJsonButton->setEnabled(false);
     siteEditor->parameterEnabled(false);
     pulsePowerEditor->parameterEnabled(false);
     numRepeatsEditor->parameterEnabled(false);
@@ -583,10 +765,12 @@ OptoSequenceInterface::OptoSequenceInterface(const String& name,
     
     if (!skipDefaultCondition)
     {
-        Array<String> availableSources = {"Probe A", "Probe B"};
-        Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
-        Array<int> availableWavelengths = {638};
-        
+        Array<String> availableSources;
+        Array<int> sitesPerSource;
+        Array<int> availableWavelengths;
+        if (parent != nullptr)
+            parent->getNewConditionArrays(availableSources, sitesPerSource, availableWavelengths);
+
         Condition* condition = new Condition(parent, availableSources,
                                              sitesPerSource,
                                              availableWavelengths,
@@ -739,9 +923,11 @@ void OptoSequenceInterface::buttonClicked(Button* button)
         const int result = m.showMenu(PopupMenu::Options{}.withStandardItemHeight(20));
         if (result == 0)
             return;
-        Array<String> availableSources = {"Probe A", "Probe B"};
-        Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
-        Array<int> availableWavelengths = {638};
+        Array<String> availableSources;
+        Array<int> sitesPerSource;
+        Array<int> availableWavelengths;
+        if (parent != nullptr)
+            parent->getNewConditionArrays(availableSources, sitesPerSource, availableWavelengths);
         Condition* condition = new Condition(parent, availableSources, sitesPerSource, availableWavelengths, sequence);
         sequence->addCondition(condition);
         if (result == 1)
@@ -1134,7 +1320,7 @@ String ConditionsTableModel::exportCsv()
 {
     if (!protocol) return {};
     static const char* headerNames[] = {
-        "Trial", "Sequence", "Condition", "Probe", "Wavelength", "Site",
+        "Trial", "Sequence", "Condition", "Source", "Wavelength", "Site",
         "Light Power", "ITI", "Start", "End", "Repeat"
     };
     static const int colIds[] = {
@@ -1173,7 +1359,7 @@ ConditionsTable::ConditionsTable()
     table.getHeader().addColumn("Trial", ColRow, 44, 36, 80);
     table.getHeader().addColumn("Sequence", ColSequence, 62, 50, 80);
     table.getHeader().addColumn("Condition", ColCondition, 88, 70, 120);
-    table.getHeader().addColumn("Probe", ColProbe, 68, 56, 100);
+    table.getHeader().addColumn("Source", ColProbe, 68, 56, 100);
     table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120);
     table.getHeader().addColumn("Site", ColSites, 26, 18, 45);
     table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
@@ -1266,6 +1452,12 @@ OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewp
     addSequenceButton->setButtonText("Add Sequence");
     addSequenceButton->addListener(this);
     addAndMakeVisible(addSequenceButton.get());
+
+    loadSourcesGlobalButton = std::make_unique<TextButton>("loadSourcesGlobal");
+    loadSourcesGlobalButton->setButtonText("Load Sources");
+    loadSourcesGlobalButton->setTooltip("Load a hardware JSON file (replaces the current source configuration).");
+    loadSourcesGlobalButton->addListener(this);
+    addAndMakeVisible(loadSourcesGlobalButton.get());
     
     saveTableCsvButton = std::make_unique<TextButton>("saveTableCsv");
     saveTableCsvButton->setButtonText("Export Table");
@@ -1305,6 +1497,8 @@ void OptoProtocolInterface::updateBounds(int expandBy)
 void OptoProtocolInterface::resized()
 {
     int leftMargin = 15;
+    if (loadSourcesGlobalButton)
+        loadSourcesGlobalButton->setBounds(leftMargin, 4, 112, 20);
     int currentHeight = 30;
     for (auto interface : sequenceInterfaces)
     {
@@ -1332,6 +1526,11 @@ void OptoProtocolInterface::paint(Graphics& g)
 
 void OptoProtocolInterface::buttonClicked(Button* button)
 {
+    if (button == loadSourcesGlobalButton.get())
+    {
+        launchLoadHardwareJsonChooser();
+        return;
+    }
     if (button == saveTableCsvButton.get())
     {
         const Time t = Time::getCurrentTime();
@@ -1418,6 +1617,21 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
         
         LOGD("Parameter name: ", parameter->getName(),
              ", new value: ", parameter->getValueAsString());
+
+        if (hardwareConfig != nullptr)
+        {
+            for (auto* si : sequenceInterfaces)
+            {
+                for (auto* ci : si->getConditionInterfaces())
+                {
+                    if (parameter == &ci->getCondition()->source)
+                    {
+                        ci->getCondition()->refreshForSelectedSource(hardwareConfig.get());
+                        ci->onHardwareConfigChanged();
+                    }
+                }
+            }
+        }
     }
     
     if (timeline != nullptr)
@@ -1461,6 +1675,72 @@ float OptoProtocolInterface::getTableTotalDuration()
     return conditionsTable->getTotalProtocolDuration();
 }
 
+void OptoProtocolInterface::getNewConditionArrays(Array<String>& names, Array<int>& sites, Array<int>& wavelengths) const
+{
+    names.clear();
+    sites.clear();
+    wavelengths.clear();
+    if (!hasHardwareConfig())
+    {
+        names.add("");
+        sites.add(1);
+        return;
+    }
+    for (const auto& d : hardwareConfig->devices)
+    {
+        names.add(d.name);
+        sites.add(d.is_np_opto ? kNpOptoSitesPerSource : 1);
+    }
+    if (hardwareConfig->devices.size() > 0)
+    {
+        const auto& d0 = hardwareConfig->devices.getReference(0);
+        if (d0.lightSources.size() > 0)
+            wavelengths.add(d0.lightSources.getReference(0).wavelength);
+    }
+}
+
+void OptoProtocolInterface::launchLoadHardwareJsonChooser()
+{
+    hardwareFileChooser = std::make_unique<FileChooser>("Load hardware JSON", File{}, "*.json", true, false, this);
+    const auto flags = FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles;
+    hardwareFileChooser->launchAsync(flags, [this](const FileChooser& c) {
+        const File f = c.getResult();
+        if (f != File())
+        {
+            auto cfg = OptoHardwareConfig::parseFile(f);
+            if (cfg != nullptr)
+                applyLoadedHardwareConfig(std::move(cfg), f.getFullPathName());
+            else
+                AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Hardware JSON", "Could not parse the selected file.");
+        }
+        hardwareFileChooser.reset();
+    });
+}
+
+void OptoProtocolInterface::applyLoadedHardwareConfig(std::unique_ptr<OptoHardwareConfig> cfg, const String& pathForXml)
+{
+    hardwareConfig = std::move(cfg);
+    hardwareConfigPath = pathForXml;
+    for (auto* si : sequenceInterfaces)
+        for (auto* ci : si->getConditionInterfaces())
+            ci->getCondition()->applyHardwareCatalog(hardwareConfig.get());
+    for (auto* si : sequenceInterfaces)
+        for (auto* ci : si->getConditionInterfaces())
+            ci->onHardwareConfigChanged();
+    protocol->createTrials();
+    refreshConditionsTable();
+    if (timeline != nullptr)
+    {
+        timeline->reset();
+        timeline->setTotalTime(getTableTotalDuration());
+        timeline->setTotalTrials(protocol->getTotalTrials());
+    }
+    Timer::callAfterDelay(0, [this]() {
+        updateBounds(0);
+        resized();
+    });
+}
+
 void OptoProtocolInterface::updateExportTableButtonState()
 {
     if (!saveTableCsvButton || !conditionsTable)
@@ -1502,6 +1782,8 @@ void OptoProtocolInterface::enable()
     }
     
     addSequenceButton->setEnabled(true);
+    if (loadSourcesGlobalButton)
+        loadSourcesGlobalButton->setEnabled(true);
     updateExportTableButtonState();
 }
 
@@ -1515,6 +1797,8 @@ void OptoProtocolInterface::disable()
     }
     
     addSequenceButton->setEnabled(false);
+    if (loadSourcesGlobalButton)
+        loadSourcesGlobalButton->setEnabled(false);
     if (saveTableCsvButton)
         saveTableCsvButton->setEnabled(false);
 }
@@ -1613,10 +1897,19 @@ void OptoSequenceInterface::importConditionFromXml(XmlElement* cEl)
 {
     if (cEl == nullptr || cEl->getTagName() != "CONDITION")
         return;
-    Array<String> availableSources = {"Probe A", "Probe B"};
-    Array<int> sitesPerSource = {SITES_PER_SOURCE, SITES_PER_SOURCE};
-    Array<int> availableWavelengths = {638};
-    Condition* condition = new Condition(parent, availableSources, sitesPerSource, availableWavelengths, sequence);
+    Array<String> availableSources;
+    Array<int> sitesPerSource;
+    if (parent != nullptr && parent->hasHardwareConfig())
+    {
+        Array<int> dummy;
+        parent->getNewConditionArrays(availableSources, sitesPerSource, dummy);
+    }
+    else
+    {
+        availableSources = { "Probe A", "Probe B" };
+        sitesPerSource = { kNpOptoSitesPerSource, kNpOptoSitesPerSource };
+    }
+    Condition* condition = new Condition(parent, availableSources, sitesPerSource, Array<int>{638}, sequence);
     sequence->addCondition(condition);
     condition->availableWavelengths.clear();
     {
@@ -1633,7 +1926,7 @@ void OptoSequenceInterface::importConditionFromXml(XmlElement* cEl)
     condition->source.setNextValue(cEl->getIntAttribute("sourceIndex", 0), false);
     condition->pulse_power.setNextValue((float)cEl->getDoubleAttribute("pulsePower", 10.0), false);
     {
-        const int srcIdx = jlimit(0, 1, condition->source.getSelectedIndex());
+        const int srcIdx = jlimit(0, jmax(0, sitesPerSource.size() - 1), condition->source.getSelectedIndex());
         condition->sites->setChannelCount(sitesPerSource[srcIdx]);
         String sitesStr = cEl->getStringAttribute("sites", "0");
         Array<var> siteVals;
@@ -1644,6 +1937,8 @@ void OptoSequenceInterface::importConditionFromXml(XmlElement* cEl)
                 siteVals.add(t.getIntValue());
         condition->sites->setNextValue(var(siteVals), false);
     }
+    if (parent != nullptr && parent->hasHardwareConfig())
+        condition->refreshForSelectedSource(parent->getHardwareConfig());
     XmlElement* sEl = cEl->getChildByName("STIMULUS");
     if (sEl == nullptr)
         return;
@@ -1714,6 +2009,8 @@ void OptoProtocolInterface::appendProtocolXml(XmlElement* visParent)
     XmlElement* p = visParent->createNewChildElement("PROTOCOL");
     p->setAttribute("name", protocol->name);
     p->setAttribute("description", protocol->description);
+    if (hardwareConfigPath.isNotEmpty())
+        p->setAttribute("hardwareConfigPath", hardwareConfigPath);
     for (int i = 0; i < sequenceInterfaces.size(); ++i)
     {
         Sequence* seq = sequenceInterfaces[i]->getSequence();
@@ -1734,6 +2031,14 @@ void OptoProtocolInterface::loadProtocolFromXml(XmlElement* protocolElement)
         return;
     protocol->name = protocolElement->getStringAttribute("name", protocol->name);
     protocol->description = protocolElement->getStringAttribute("description");
+    hardwareConfigPath = protocolElement->getStringAttribute("hardwareConfigPath");
+    hardwareConfig.reset();
+    if (hardwareConfigPath.isNotEmpty())
+    {
+        const File hf(hardwareConfigPath);
+        if (hf.existsAsFile())
+            hardwareConfig = OptoHardwareConfig::parseFile(hf);
+    }
     clearAllSequences();
     for (auto* seqEl = protocolElement->getFirstChildElement(); seqEl != nullptr; seqEl = seqEl->getNextElement())
     {
@@ -2099,7 +2404,8 @@ void OptoProtocolCanvas::actionListenerCallback(const String& message)
             Sequence* seq = currentProtocol->sequences[seqIdx];
             if (trialStarted < seq->getTotalTrials())
             {
-                String json = trialToNidaqJson(seq, trialStarted);
+                const OptoHardwareConfig* hw = iface != nullptr ? iface->getHardwareConfig() : nullptr;
+                String json = trialToNidaqJson(seq, trialStarted, hw);
                 processor->sendConfigToNidaqOutput(json);
             }
         }

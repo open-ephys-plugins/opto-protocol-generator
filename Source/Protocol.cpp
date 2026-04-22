@@ -22,6 +22,7 @@
 */
 
 #include "Protocol.h"
+#include "OptoHardwareConfig.h"
 
 #include <utility>
 
@@ -250,11 +251,11 @@ Condition::Condition(ParameterOwner* owner_,
     pulse_power(owner_, Parameter::VISUALIZER_SCOPE,
                "pulse_power",
                "Light power",
-               "Peak output power (in microwatts)",
-               "uW",
-               10,
-               0,
-               10000)
+               "Peak output power (scales using hardware JSON power/voltage table)",
+               "",
+               10.f,
+               0.f,
+               1.0e6f)
 {
     // Initialize with no stimuli
     num_repeats.setKey((String(sequence->protocol->index) + ":" + String(sequence->index) + ":" + String(index) + ":num_repeats").toStdString());
@@ -319,6 +320,53 @@ void Condition::removeWavelength(int wavelength)
     int wavelengthIndex = availableWavelengths.indexOf(wavelength);
     if (wavelengthIndex != -1)
         availableWavelengths.remove(wavelengthIndex);
+}
+
+void Condition::applyHardwareCatalog(const OptoHardwareConfig* cfg)
+{
+    if (cfg == nullptr || cfg->isEmpty())
+        return;
+
+    Array<String> names;
+    Array<int> sites;
+    for (const auto& d : cfg->devices)
+    {
+        names.add(d.name);
+        sites.add(d.is_np_opto ? kNpOptoSitesPerSource : 1);
+    }
+
+    sitesPerSource = sites;
+    source.setCategories(names);
+    refreshForSelectedSource(cfg);
+}
+
+void Condition::refreshForSelectedSource(const OptoHardwareConfig* cfg)
+{
+    if (cfg == nullptr || cfg->isEmpty())
+        return;
+
+    const int di = jlimit(0, cfg->devices.size() - 1, source.getSelectedIndex());
+    const auto& dev = cfg->devices.getReference(di);
+    sites->setChannelCount(jmax(1, sitesPerSource[di]));
+
+    for (int i = availableWavelengths.size() - 1; i >= 0; --i)
+    {
+        const int wl = availableWavelengths[i];
+        bool ok = false;
+        for (const auto& ls : dev.lightSources)
+        {
+            if (ls.wavelength == wl)
+            {
+                ok = true;
+                break;
+            }
+        }
+        if (!ok)
+            removeWavelength(wl);
+    }
+
+    if (availableWavelengths.isEmpty() && dev.lightSources.size() > 0)
+        addWavelength(dev.lightSources.getReference(0).wavelength);
 }
 
 

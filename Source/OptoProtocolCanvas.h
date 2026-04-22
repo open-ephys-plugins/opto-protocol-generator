@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <tuple>
 
 #include "Protocol.h"
+#include "OptoHardwareConfig.h"
 
 namespace juce { class FileChooser; }
 class OptoProtocolGenerator;
@@ -197,15 +198,20 @@ public:
     /** Disables the colour selector widget */
     void disable();
 
-    /** Sets 450/638 toggles from condition->availableWavelengths (e.g. after XML load). */
+    /** Rebuild wavelength toggles from hardware JSON + current source. */
+    void rebuildFromConfig();
+
+    /** Sync toggle states from condition->availableWavelengths. */
     void syncFromCondition();
     
 private:
-    /** Buttons */
-    std::unique_ptr<TextButton> redButton;
-    std::unique_ptr<TextButton> blueButton;
     std::unique_ptr<Label> wavelengthLabel;
-    
+    std::vector<std::unique_ptr<TextButton>> wavelengthButtons;
+    std::vector<int> buttonWavelengths;
+
+    void layoutNpOptoStyle();
+    void layoutLinearButtons();
+
     Condition* condition;
     OptoProtocolInterface* parent;
 };
@@ -264,12 +270,17 @@ OptoConditionInterface(Condition* condition,
     
     /** Return the condition object for this interface*/
     Condition* getCondition() { return condition; }
-    
+
+    /** Source combo vs Load Sources, wavelength row visibility, refresh toggles. */
+    void refreshSourceLoadUi();
+    void onHardwareConfigChanged();
+
 protected:
     
     std::unique_ptr<Label> stimulusTypeLabel;
     
     std::unique_ptr<ComboBoxParameterEditor> sourceEditor;
+    std::unique_ptr<TextButton> loadJsonButton;
     std::unique_ptr<SelectedChannelsParameterEditor> siteEditor;
     std::unique_ptr<ColourSelectorWidget> colourSelectorWidget;
     std::unique_ptr<BoundedValueParameterEditor> pulsePowerEditor;
@@ -298,6 +309,8 @@ class OptoSequenceInterface : public Component,
 public:
 
     static constexpr int kConditionInterfaceHeight = 176;
+
+    OwnedArray<OptoConditionInterface>& getConditionInterfaces() { return conditionInterfaces; }
 
     /** Constructor */
     OptoSequenceInterface(const String& name,
@@ -560,6 +573,16 @@ public:
     void setTableRunning(bool running);
     /** Total protocol duration matching the conditions table (timeline should use this). */
     float getTableTotalDuration();
+
+    bool hasHardwareConfig() const { return hardwareConfig != nullptr; }
+    const OptoHardwareConfig* getHardwareConfig() const { return hardwareConfig.get(); }
+
+    /** When no JSON: single placeholder source; empty wavelengths. With JSON: devices from file. */
+    void getNewConditionArrays(Array<String>& names, Array<int>& sites, Array<int>& wavelengths) const;
+
+    void launchLoadHardwareJsonChooser();
+    void applyLoadedHardwareConfig(std::unique_ptr<OptoHardwareConfig> cfg, const String& pathForXml);
+
 private:
     void updateExportTableButtonState();
     void updateExportStatusLabel();
@@ -568,11 +591,16 @@ private:
     OwnedArray<OptoSequenceInterface> sequenceInterfaces;
     
     std::unique_ptr<TextButton> addSequenceButton;
+    std::unique_ptr<TextButton> loadSourcesGlobalButton;
     std::unique_ptr<TextButton> saveTableCsvButton;
     std::unique_ptr<Label> exportStatusLabel;
     String lastExportedCsvSnapshot;
     String lastSavedTimestampDisplay;
     std::unique_ptr<juce::FileChooser> fileChooser;
+    std::unique_ptr<juce::FileChooser> hardwareFileChooser;
+
+    std::unique_ptr<OptoHardwareConfig> hardwareConfig;
+    String hardwareConfigPath;
     
     std::unique_ptr<ConditionsTable> conditionsTable;
     
