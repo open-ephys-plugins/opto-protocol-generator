@@ -1,0 +1,7 @@
+TODO:
+
+Should protocol names be unique or okay to have duplicates/copies?
+Probe red/blue wavelengths have different power/voltage maps but single power editor...
+Default source on load?
+
+Test power voltage mapping
