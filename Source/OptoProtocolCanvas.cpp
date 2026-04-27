@@ -78,6 +78,48 @@ static String getLineText(const String& text, int lineNumber)
     return lines[lineNumber - 1].trim();
 }
 
+static String getHardwareSchemaErrorMessage(const var& syntaxRoot)
+{
+    auto* rootObj = syntaxRoot.getDynamicObject();
+    if (rootObj == nullptr)
+        return "Root JSON object is missing.";
+
+    auto* devices = rootObj->getProperty("devices").getArray();
+    if (devices == nullptr || devices->isEmpty())
+        return "Missing or empty 'devices' array.";
+
+    for (int di = 0; di < devices->size(); ++di)
+    {
+        auto* dObj = (*devices)[di].getDynamicObject();
+        if (dObj == nullptr)
+            return "Device #" + String(di + 1) + " is not a JSON object.";
+
+        const String deviceName = dObj->getProperty("name").toString();
+        auto* lightSources = dObj->getProperty("light_sources").getArray();
+        if (lightSources == nullptr || lightSources->isEmpty())
+            return "Device '" + (deviceName.isNotEmpty() ? deviceName : ("#" + String(di + 1))) + "' has no light_sources.";
+
+        for (int li = 0; li < lightSources->size(); ++li)
+        {
+            auto* lsObj = (*lightSources)[li].getDynamicObject();
+            if (lsObj == nullptr)
+                return "Device '" + (deviceName.isNotEmpty() ? deviceName : ("#" + String(di + 1))) + "', light source #" + String(li + 1) + " is not a JSON object.";
+
+            const String lsName = lsObj->getProperty("name").toString();
+            const String lsLabel = lsName.isNotEmpty() ? lsName : ("#" + String(li + 1));
+            auto* inputVoltages = lsObj->getProperty("input_voltages").getArray();
+            auto* outputPowers = lsObj->getProperty("output_powers").getArray();
+            if (inputVoltages == nullptr || outputPowers == nullptr)
+                return "Device '" + (deviceName.isNotEmpty() ? deviceName : ("#" + String(di + 1))) + "', light source '" + lsLabel + "': missing input_voltages or output_powers array.";
+
+            if (inputVoltages->size() != outputPowers->size())
+                return "Device '" + (deviceName.isNotEmpty() ? deviceName : ("#" + String(di + 1))) + "', light source '" + lsLabel + "': input voltage count does not match output power count (" + String(inputVoltages->size()) + " vs " + String(outputPowers->size()) + ").";
+        }
+    }
+
+    return "JSON structure is invalid for hardware sources.";
+}
+
 class HardwareJsonEditorComponent : public Component, public Button::Listener, private Timer
 {
 public:
@@ -2013,7 +2055,7 @@ void OptoProtocolInterface::launchEditHardwareJsonDialog()
     hardwareJsonEditorWindow->setUsingNativeTitleBar(true);
     hardwareJsonEditorWindow->setResizable(true, true);
     hardwareJsonEditorWindow->setContentOwned(editor.release(), true);
-    hardwareJsonEditorWindow->centreWithSize(760, 520);
+    hardwareJsonEditorWindow->centreWithSize(760, 1040);
     hardwareJsonEditorWindow->setVisible(true);
     hardwareJsonEditorWindow->enterModalState(true, nullptr, false);
 }
@@ -2046,7 +2088,10 @@ bool OptoProtocolInterface::tryApplyHardwareJsonText(const String& jsonText, boo
     if (cfg == nullptr)
     {
         if (showInvalidAlert)
-            AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Edit Sources", "JSON is valid syntax, but does not match the expected hardware schema.");
+            AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon,
+                                             "Edit Sources",
+                                             "JSON is valid syntax, but does not match the expected hardware schema.\n\n"
+                                                 + getHardwareSchemaErrorMessage(syntaxRoot));
         return false;
     }
 

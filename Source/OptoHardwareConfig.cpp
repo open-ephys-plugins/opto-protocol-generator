@@ -28,17 +28,46 @@ static OptoHardwareLightSource parseLightSource(DynamicObject& o)
     return ls;
 }
 
-static OptoHardwareDevice parseDevice(DynamicObject& o)
+static bool isValidLightSource(const OptoHardwareLightSource& ls)
 {
-    OptoHardwareDevice d;
-    d.name = o.getProperty("name").toString();
-    d.is_np_opto = (bool) o.getProperty("is_np_opto");
+    if (ls.name.isEmpty() || ls.wavelength <= 0 || ls.outputChannel < 0)
+        return false;
+
+    const int nIn = ls.inputVoltages.size();
+    const int nOut = ls.outputPowers.size();
+    if (nIn == 0 || nOut == 0 || nIn != nOut)
+        return false;
+
+    return true;
+}
+
+static bool parseDevice(DynamicObject& o, OptoHardwareDevice& outDevice)
+{
+    outDevice = {};
+    outDevice.name = o.getProperty("name").toString();
+    outDevice.is_np_opto = (bool) o.getProperty("is_np_opto");
+    if (outDevice.name.isEmpty())
+        return false;
+
     var lsVar = o.getProperty("light_sources");
-    if (auto* arr = lsVar.getArray())
-        for (auto& item : *arr)
-            if (auto* lo = item.getDynamicObject())
-                d.lightSources.add(parseLightSource(*lo));
-    return d;
+    auto* arr = lsVar.getArray();
+    if (arr == nullptr || arr->isEmpty())
+        return false;
+
+    for (auto& item : *arr)
+    {
+        auto* lo = item.getDynamicObject();
+        if (lo == nullptr)
+            return false;
+
+        auto ls = parseLightSource(*lo);
+        if (!isValidLightSource(ls))
+            return false;
+
+        outDevice.lightSources.add(ls);
+    }
+
+    return outDevice.lightSources.size() > 0;
 }
 
 std::unique_ptr<OptoHardwareConfig> OptoHardwareConfig::parseJson(const String& jsonText)
@@ -56,10 +85,13 @@ std::unique_ptr<OptoHardwareConfig> OptoHardwareConfig::parseJson(const String& 
     {
         if (auto* dObj = dv.getDynamicObject())
         {
-            auto d = parseDevice(*dObj);
-            if (d.name.isNotEmpty() && d.lightSources.size() > 0)
-                cfg->devices.add(d);
+            OptoHardwareDevice d;
+            if (!parseDevice(*dObj, d))
+                return nullptr;
+            cfg->devices.add(d);
         }
+        else
+            return nullptr;
     }
     if (cfg->devices.isEmpty())
         return nullptr;
