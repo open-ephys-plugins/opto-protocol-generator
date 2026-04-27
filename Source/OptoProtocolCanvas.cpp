@@ -304,12 +304,16 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
     const OptoHardwareLightSource* ls = nullptr;
     if (hw != nullptr && !hw->isEmpty())
     {
-        const int di = jlimit(0, hw->devices.size() - 1, c->source.getSelectedIndex());
+        // getFloatValue can synchronously run listeners that replace/reallocate the hardware
+        // config; never hold a light-source pointer from findLightSource across that call.
+        const float pulsePower = c->pulse_power.getFloatValue();
+        const int di = jlimit(0, (int) hw->devices.size() - 1, c->source.getSelectedIndex());
         ls = hw->findLightSource(di, wavelengthNm);
         if (ls != nullptr)
         {
-            analogChannel = ls->outputChannel;
-            maxVoltage = OptoHardwareConfig::mapPowerToControlVoltage(c->pulse_power.getFloatValue(), *ls);
+            const OptoHardwareLightSource& cal = *ls;
+            analogChannel = cal.outputChannel;
+            maxVoltage = OptoHardwareConfig::mapPowerToControlVoltage(pulsePower, cal);
         }
     }
 
@@ -321,6 +325,8 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
             analogChannel = 1;
         maxVoltage = (float) kMaxVoltage;
     }
+
+    patternRoot->setProperty("maxVoltage", maxVoltage);
 
     if (s->type == PULSE_TRAIN)
     {
@@ -467,13 +473,13 @@ void ColourSelectorWidget::rebuildFromConfig()
     if (hw == nullptr || hw->isEmpty())
         return;
 
-    const int di = jlimit(0, hw->devices.size() - 1, condition->source.getSelectedIndex());
-    const auto& dev = hw->devices.getReference(di);
+    const int di = jlimit(0, (int) hw->devices.size() - 1, condition->source.getSelectedIndex());
+    const auto& dev = hw->devices[di];
 
     int idx450 = -1, idx638 = -1;
     for (int i = 0; i < dev.lightSources.size(); ++i)
     {
-        const int w = dev.lightSources.getReference(i).wavelength;
+        const int w = dev.lightSources[i].wavelength;
         if (w == 450) idx450 = i;
         if (w == 638) idx638 = i;
     }
@@ -514,8 +520,8 @@ void ColourSelectorWidget::layoutNpOptoStyle()
 void ColourSelectorWidget::layoutLinearButtons()
 {
     const auto* hw = parent->getHardwareConfig();
-    const int di = jlimit(0, hw->devices.size() - 1, condition->source.getSelectedIndex());
-    const auto& dev = hw->devices.getReference(di);
+    const int di = jlimit(0, (int) hw->devices.size() - 1, condition->source.getSelectedIndex());
+    const auto& dev = hw->devices[di];
     int x = 0;
     for (const auto& ls : dev.lightSources)
     {
@@ -1868,16 +1874,42 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
         LOGD("Parameter name: ", parameter->getName(),
              ", new value: ", parameter->getValueAsString());
 
-        if (hardwareConfig != nullptr)
+        if (hardwareConfig != nullptr && !hardwareConfig->isEmpty())
         {
             for (auto* si : sequenceInterfaces)
             {
                 for (auto* ci : si->getConditionInterfaces())
                 {
-                    if (parameter == &ci->getCondition()->source)
+                    Condition* cnd = ci->getCondition();
+                    if (parameter == &cnd->source)
                     {
-                        ci->getCondition()->refreshForSelectedSource(hardwareConfig.get());
+                        cnd->refreshForSelectedSource(hardwareConfig.get());
                         ci->onHardwareConfigChanged();
+                    }
+                    if (parameter == &cnd->pulse_power)
+                    {
+                        const float pulsePower = cnd->pulse_power.getFloatValue();
+                        const int di = jlimit(0, (int) hardwareConfig->devices.size() - 1, cnd->source.getSelectedIndex());
+                        auto logForWavelength = [&](int wavelengthNm) {
+                            if (const OptoHardwareLightSource* lsp = hardwareConfig->findLightSource(di, wavelengthNm))
+                            {
+                                const OptoHardwareLightSource& cal = *lsp;
+                                const float maxVoltage = OptoHardwareConfig::mapPowerToControlVoltage(pulsePower, cal);
+                                LOGD("mapPowerToControlVoltage: pulsePower=", String(pulsePower, 4),
+                                     " nm=", wavelengthNm, " -> maxVoltage=", String(maxVoltage, 4));
+                            }
+                        };
+                        if (cnd->availableWavelengths.size() > 0)
+                        {
+                            for (int wli = 0; wli < cnd->availableWavelengths.size(); ++wli)
+                                logForWavelength(cnd->availableWavelengths[wli]);
+                        }
+                        else
+                        {
+                            const auto& dev = hardwareConfig->devices[di];
+                            for (int lsi = 0; lsi < dev.lightSources.size(); ++lsi)
+                                logForWavelength(dev.lightSources[lsi].wavelength);
+                        }
                     }
                 }
             }
@@ -1943,9 +1975,9 @@ void OptoProtocolInterface::getNewConditionArrays(Array<String>& names, Array<in
     }
     if (hardwareConfig->devices.size() > 0)
     {
-        const auto& d0 = hardwareConfig->devices.getReference(0);
+        const auto& d0 = hardwareConfig->devices[0];
         if (d0.lightSources.size() > 0)
-            wavelengths.add(d0.lightSources.getReference(0).wavelength);
+            wavelengths.add(d0.lightSources[0].wavelength);
     }
 }
 

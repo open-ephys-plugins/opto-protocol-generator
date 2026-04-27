@@ -345,8 +345,8 @@ void Condition::refreshForSelectedSource(const OptoHardwareConfig* cfg)
     if (cfg == nullptr || cfg->isEmpty())
         return;
 
-    const int di = jlimit(0, cfg->devices.size() - 1, source.getSelectedIndex());
-    const auto& dev = cfg->devices.getReference(di);
+    const int di = jlimit(0, (int) cfg->devices.size() - 1, source.getSelectedIndex());
+    const auto& dev = cfg->devices[di];
     sites->setChannelCount(jmax(1, sitesPerSource[di]));
 
     for (int i = availableWavelengths.size() - 1; i >= 0; --i)
@@ -366,7 +366,7 @@ void Condition::refreshForSelectedSource(const OptoHardwareConfig* cfg)
     }
 
     if (availableWavelengths.isEmpty() && dev.lightSources.size() > 0)
-        addWavelength(dev.lightSources.getReference(0).wavelength);
+        addWavelength(dev.lightSources[0].wavelength);
 }
 
 

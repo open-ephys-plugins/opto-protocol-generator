@@ -8,12 +8,12 @@
 
 using namespace juce;
 
-static void parseFloatArray(const var& v, Array<float>& out)
+static void parseFloatArray(const var& v, std::vector<float>& out)
 {
     out.clear();
     if (auto* a = v.getArray())
         for (auto& x : *a)
-            out.add((float) static_cast<double>(x));
+            out.push_back((float) static_cast<double>(x));
 }
 
 static OptoHardwareLightSource parseLightSource(DynamicObject& o)
@@ -25,6 +25,18 @@ static OptoHardwareLightSource parseLightSource(DynamicObject& o)
     ls.outputUnits = o.getProperty("output_units").toString();
     parseFloatArray(o.getProperty("input_voltages"), ls.inputVoltages);
     parseFloatArray(o.getProperty("output_powers"), ls.outputPowers);
+
+    //print loaded ls to console
+    std::cout << "Loaded light source: " << ls.name << " " << ls.wavelength << " " << ls.outputChannel << " " << ls.outputUnits << " " << ls.inputVoltages.size() << " " << ls.outputPowers.size() << std::endl;
+    for (int i = 0; i < ls.inputVoltages.size(); i++)
+    {
+        std::cout << "Input voltage " << i << ": " << ls.inputVoltages[i] << std::endl;
+    }
+    for (int i = 0; i < ls.outputPowers.size(); i++)
+    {
+        std::cout << "Output power " << i << ": " << ls.outputPowers[i] << std::endl;
+    }
+    std::cout << std::endl;
     return ls;
 }
 
@@ -64,10 +76,10 @@ static bool parseDevice(DynamicObject& o, OptoHardwareDevice& outDevice)
         if (!isValidLightSource(ls))
             return false;
 
-        outDevice.lightSources.add(ls);
+        outDevice.lightSources.push_back(ls);
     }
 
-    return outDevice.lightSources.size() > 0;
+    return !outDevice.lightSources.empty();
 }
 
 std::unique_ptr<OptoHardwareConfig> OptoHardwareConfig::parseJson(const String& jsonText)
@@ -88,12 +100,12 @@ std::unique_ptr<OptoHardwareConfig> OptoHardwareConfig::parseJson(const String& 
             OptoHardwareDevice d;
             if (!parseDevice(*dObj, d))
                 return nullptr;
-            cfg->devices.add(d);
+            cfg->devices.push_back(d);
         }
         else
             return nullptr;
     }
-    if (cfg->devices.isEmpty())
+    if (cfg->devices.empty())
         return nullptr;
     return cfg;
 }
@@ -116,7 +128,7 @@ int OptoHardwareConfig::maxAnalogOutputChannel() const
 
 const OptoHardwareLightSource* OptoHardwareConfig::findLightSource(int deviceIndex, int wavelengthNm) const
 {
-    if (deviceIndex < 0 || deviceIndex >= devices.size())
+    if (deviceIndex < 0 || deviceIndex >= (int) devices.size())
         return nullptr;
     for (auto& ls : devices[deviceIndex].lightSources)
         if (ls.wavelength == wavelengthNm)
@@ -126,23 +138,48 @@ const OptoHardwareLightSource* OptoHardwareConfig::findLightSource(int deviceInd
 
 float OptoHardwareConfig::mapPowerToControlVoltage(float power, const OptoHardwareLightSource& ls)
 {
-    const int n = jmin(ls.outputPowers.size(), ls.inputVoltages.size());
+    const int n = jmin((int) ls.outputPowers.size(), (int) ls.inputVoltages.size());
     if (n <= 0)
         return 0.f;
     if (n == 1)
         return ls.inputVoltages[0];
-    const float pLo = ls.outputPowers[0];
-    const float pHi = ls.outputPowers[n - 1];
-    const float pClamp = jlimit(pLo, pHi, power);
+
+    int minPowerIdx = 0;
+    int maxPowerIdx = 0;
+    for (int i = 1; i < n; ++i)
+    {
+        if (ls.outputPowers[i] < ls.outputPowers[minPowerIdx])
+            minPowerIdx = i;
+        if (ls.outputPowers[i] > ls.outputPowers[maxPowerIdx])
+            maxPowerIdx = i;
+    }
+
+    if (power <= ls.outputPowers[minPowerIdx])
+    {
+        LOGC("Mapping output power " + String(power) + " to voltage " + String(ls.inputVoltages[minPowerIdx]));
+        return ls.inputVoltages[minPowerIdx];
+    }
+    if (power >= ls.outputPowers[maxPowerIdx])
+    {
+        LOGC("Mapping output power " + String(power) + " to voltage " + String(ls.inputVoltages[maxPowerIdx]));
+        return ls.inputVoltages[maxPowerIdx];
+    }
+
     for (int i = 1; i < n; ++i)
     {
         const float p0 = ls.outputPowers[i - 1];
         const float p1 = ls.outputPowers[i];
-        if (pClamp <= p1 || i == n - 1)
+        const float pMin = jmin(p0, p1);
+        const float pMax = jmax(p0, p1);
+        if (power >= pMin && power <= pMax)
         {
-            const float t = (p1 > p0) ? jlimit(0.f, 1.f, (pClamp - p0) / (p1 - p0)) : 0.f;
-            return ls.inputVoltages[i - 1] + t * (ls.inputVoltages[i] - ls.inputVoltages[i - 1]);
+            const float t = (p1 != p0) ? jlimit(0.f, 1.f, (power - p0) / (p1 - p0)) : 0.f;
+            const float voltage = ls.inputVoltages[i - 1] + t * (ls.inputVoltages[i] - ls.inputVoltages[i - 1]);
+            LOGC("Mapping output power " + String(power) + " to voltage " + String(voltage));
+            return voltage;
         }
     }
-    return ls.inputVoltages[n - 1];
+
+    LOGC("Mapping output power " + String(power) + " to voltage " + String(ls.inputVoltages[maxPowerIdx]));
+    return ls.inputVoltages[maxPowerIdx];
 }
