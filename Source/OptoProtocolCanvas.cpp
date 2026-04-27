@@ -37,7 +37,48 @@ static const double kMaxVoltage = 5.0;
 /** Pad NIDAQ buffer to this many AO channels so trial-to-trial config does not resize tasks. */
 static const int kNidaqMinAnalogChannels = 2;
 
-class HardwareJsonEditorComponent : public Component, public Button::Listener
+static int parseFirstIntegerAfterToken(const String& text, const String& token)
+{
+    const int tokenStart = text.indexOfIgnoreCase(token);
+    if (tokenStart < 0)
+        return 0;
+
+    int i = tokenStart + token.length();
+    while (i < text.length() && !CharacterFunctions::isDigit(text[i]))
+        ++i;
+    int value = 0;
+    while (i < text.length() && CharacterFunctions::isDigit(text[i]))
+    {
+        value = value * 10 + (text[i] - '0');
+        ++i;
+    }
+    return value;
+}
+
+static int lineFromCharacterOffset(const String& text, int characterOffset)
+{
+    if (characterOffset <= 0)
+        return 0;
+    int line = 1;
+    const int maxChars = jmin(characterOffset, text.length());
+    for (int i = 0; i < maxChars; ++i)
+        if (text[i] == '\n')
+            ++line;
+    return line;
+}
+
+static String getLineText(const String& text, int lineNumber)
+{
+    if (lineNumber <= 0)
+        return {};
+    StringArray lines;
+    lines.addLines(text);
+    if (lineNumber > lines.size())
+        return {};
+    return lines[lineNumber - 1].trim();
+}
+
+class HardwareJsonEditorComponent : public Component, public Button::Listener, private Timer
 {
 public:
     HardwareJsonEditorComponent()
@@ -47,17 +88,34 @@ public:
         editor.setReturnKeyStartsNewLine(true);
         editor.setScrollbarsShown(true);
         editor.setFont(Font(14.0f));
+        editor.onTextChange = [this]() { updateLineNumbers(); };
+        editor.setViewportIgnoreDragFlag(true);
         addAndMakeVisible(editor);
+
+        lineNumbers.setMultiLine(true);
+        lineNumbers.setReturnKeyStartsNewLine(true);
+        lineNumbers.setReadOnly(true);
+        lineNumbers.setScrollbarsShown(false);
+        lineNumbers.setCaretVisible(false);
+        lineNumbers.setPopupMenuEnabled(false);
+        lineNumbers.setFont(Font(14.0f));
+        lineNumbers.setColour(TextEditor::backgroundColourId, Colours::transparentBlack);
+        lineNumbers.setColour(TextEditor::outlineColourId, Colours::transparentBlack);
+        lineNumbers.setColour(TextEditor::focusedOutlineColourId, Colours::transparentBlack);
+        addAndMakeVisible(lineNumbers);
 
         saveButton.addListener(this);
         resetButton.addListener(this);
         addAndMakeVisible(saveButton);
         addAndMakeVisible(resetButton);
+
+        startTimerHz(30);
     }
 
     void setText(const String& text)
     {
         editor.setText(text, dontSendNotification);
+        updateLineNumbers();
     }
 
     String getText() const
@@ -76,7 +134,12 @@ public:
         buttons.removeFromRight(8);
         resetButton.setBounds(buttons.removeFromRight(100));
         area.removeFromBottom(8);
+
+        constexpr int gutterWidth = 56;
+        auto gutter = area.removeFromLeft(gutterWidth);
+        lineNumbers.setBounds(gutter);
         editor.setBounds(area);
+        syncLineNumberViewport();
     }
 
     void buttonClicked(Button* button) override
@@ -93,7 +156,48 @@ public:
     }
 
 private:
+    static Viewport* findViewport(TextEditor& te)
+    {
+        for (int i = 0; i < te.getNumChildComponents(); ++i)
+            if (auto* vp = dynamic_cast<Viewport*>(te.getChildComponent(i)))
+                return vp;
+        return nullptr;
+    }
+
+    void timerCallback() override
+    {
+        syncLineNumberViewport();
+    }
+
+    void syncLineNumberViewport()
+    {
+        auto* mainVp = findViewport(editor);
+        auto* lineVp = findViewport(lineNumbers);
+        if (mainVp == nullptr || lineVp == nullptr)
+            return;
+        const int y = mainVp->getViewPositionY();
+        if (lineVp->getViewPositionY() != y)
+            lineVp->setViewPosition(0, y);
+    }
+
+    void updateLineNumbers()
+    {
+        const int lineCount = jmax(1, editor.getText().containsChar('\n')
+                                       ? StringArray::fromLines(editor.getText()).size()
+                                       : 1);
+        String text;
+        for (int i = 1; i <= lineCount; ++i)
+        {
+            if (i > 1)
+                text << "\n";
+            text << String(i);
+        }
+        lineNumbers.setText(text, dontSendNotification);
+        syncLineNumberViewport();
+    }
+
     TextEditor editor;
+    TextEditor lineNumbers;
     TextButton saveButton;
     TextButton resetButton;
 };
@@ -1916,11 +2020,33 @@ void OptoProtocolInterface::launchEditHardwareJsonDialog()
 
 bool OptoProtocolInterface::tryApplyHardwareJsonText(const String& jsonText, bool showInvalidAlert)
 {
+    var syntaxRoot;
+    const Result syntaxResult = JSON::parse(jsonText, syntaxRoot);
+    if (syntaxResult.failed())
+    {
+        if (showInvalidAlert)
+        {
+            const String errorText = syntaxResult.getErrorMessage();
+            int lineNumber = parseFirstIntegerAfterToken(errorText, "line");
+            if (lineNumber <= 0)
+            {
+                const int charOffset = parseFirstIntegerAfterToken(errorText, "character");
+                lineNumber = lineFromCharacterOffset(jsonText, charOffset);
+            }
+            String msg = "JSON is invalid: " + errorText;
+            const String badLine = getLineText(jsonText, lineNumber);
+            if (lineNumber > 0 && badLine.isNotEmpty())
+                msg << "\n\nFirst invalid line (" << String(lineNumber) << "):\n" << badLine;
+            AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Edit Sources", msg);
+        }
+        return false;
+    }
+
     auto cfg = OptoHardwareConfig::parseJson(jsonText);
     if (cfg == nullptr)
     {
         if (showInvalidAlert)
-            AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Edit Sources", "JSON is invalid. Fix the JSON before closing.");
+            AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Edit Sources", "JSON is valid syntax, but does not match the expected hardware schema.");
         return false;
     }
 
