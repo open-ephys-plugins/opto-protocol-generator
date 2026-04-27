@@ -2527,7 +2527,7 @@ void OptoProtocolCanvas::loadCustomParametersFromXml(XmlElement* xml)
         }
         if (protocolInterfaces.isEmpty())
         {
-            auto* iface = new OptoProtocolInterface("Optotagging 1", viewport.get());
+            auto* iface = new OptoProtocolInterface("Protocol 1", viewport.get());
             iface->setTimeline(protocolTimeline.get());
             protocolInterfaces.add(iface);
             protocolSelector->addItem(iface->getProtocol()->name, 1);
@@ -2729,7 +2729,7 @@ OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     addAndMakeVisible(viewport.get());
     
     // Create the content component
-    protocolInterfaces.add(new OptoProtocolInterface("Optotagging 1", viewport.get()));
+    protocolInterfaces.add(new OptoProtocolInterface("Protocol 1", viewport.get()));
     
     // Set an initial size for the content component
     protocolInterfaces.getLast()->setSize(getWidth(), 500); // Initial height, will be adjusted in resized()
@@ -2738,7 +2738,7 @@ OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     viewport->setViewedComponent(protocolInterfaces[0], false);
 
     protocolSelector = std::make_unique<ComboBox>("protocolSelector");
-    protocolSelector->addItem("Optotagging 1", 1);
+    protocolSelector->addItem("Protocol 1", 1);
     protocolSelector->setSelectedId(1, dontSendNotification);
     protocolSelector->addListener(this);
     addAndMakeVisible(protocolSelector.get());
@@ -2765,6 +2765,11 @@ OptoProtocolCanvas::OptoProtocolCanvas(OptoProtocolGenerator* processor_)
     deleteProtocolButton->addListener(this);
     deleteProtocolButton->setEnabled(protocolInterfaces.size() > 1);
     addAndMakeVisible(deleteProtocolButton.get());
+
+    renameProtocolButton = std::make_unique<TextButton>("renameProtocolButton");
+    renameProtocolButton->setButtonText("Rename");
+    renameProtocolButton->addListener(this);
+    addAndMakeVisible(renameProtocolButton.get());
     
     runButton = std::make_unique<TextButton>("runButton");
     runButton->setButtonText("Run");
@@ -2832,6 +2837,7 @@ void OptoProtocolCanvas::resized()
     
     newProtocolButton->setBounds(margin, margin*3 + controlHeight, buttonWidth, controlHeight);
     deleteProtocolButton->setBounds(margin + buttonWidth + 10, margin*3 + controlHeight, buttonWidth, controlHeight);
+    renameProtocolButton->setBounds(margin + (buttonWidth + 10) * 2, margin*3 + controlHeight, buttonWidth, controlHeight);
     
     runButton->setBounds(250, margin*2, buttonWidth, controlHeight);
     resetButton->setBounds(250 + 10 + buttonWidth, margin*2, buttonWidth, controlHeight);
@@ -2872,13 +2878,42 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
     if (button == newProtocolButton.get())
     {
         const int n = protocolInterfaces.size() + 1;
-        const String name = "Optotagging " + String(n);
+        const String name = "Protocol " + String(n);
         auto* iface = new OptoProtocolInterface(name, viewport.get());
         iface->setTimeline(protocolTimeline.get());
         protocolInterfaces.add(iface);
         protocolSelector->addItem(name, n);
         protocolSelector->setSelectedId(n, dontSendNotification);
         applySelectedProtocol();
+    }
+    else if (button == renameProtocolButton.get())
+    {
+        OptoProtocolInterface* iface = getCurrentInterface();
+        if (iface == nullptr)
+            return;
+
+        AlertWindow w("Rename protocol", "Enter a new name for this protocol.", AlertWindow::QuestionIcon);
+        w.addTextEditor("name", iface->getProtocol()->name, "Name:");
+        w.addButton("OK", 1, KeyPress(KeyPress::returnKey));
+        w.addButton("Cancel", 0, KeyPress(KeyPress::escapeKey));
+
+        if (w.runModalLoop() != 1)
+            return;
+
+        const String newName = w.getTextEditorContents("name").trim();
+        if (newName.isEmpty())
+        {
+            AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Rename protocol", "Name cannot be empty.");
+            return;
+        }
+
+        iface->getProtocol()->name = newName;
+        const int id = protocolSelector->getSelectedId();
+        if (id > 0)
+        {
+            protocolSelector->changeItemText(id, newName);
+            protocolSelector->setSelectedId(id, dontSendNotification);
+        }
     }
     else if (button == deleteProtocolButton.get())
     {

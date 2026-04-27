@@ -685,6 +685,9 @@ private:
     
     /** Button for deleting a protocol */
     std::unique_ptr<TextButton> deleteProtocolButton;
+
+    /** Button for renaming the selected protocol */
+    std::unique_ptr<TextButton> renameProtocolButton;
     
     /** Button for running a protocol */
     std::unique_ptr<TextButton> runButton;
