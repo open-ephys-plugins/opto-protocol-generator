@@ -1973,17 +1973,25 @@ void OptoProtocolInterface::applyLoadedHardwareConfig(std::unique_ptr<OptoHardwa
                                                       const String& jsonText)
 {
     hardwareConfig = std::move(cfg);
-    hardwareConfigPath = pathForXml;
+    if (pathForXml.isNotEmpty())
+        hardwareConfigPath = pathForXml;
     if (jsonText.isNotEmpty())
         hardwareConfigJsonText = jsonText;
     if (editSourcesGlobalButton != nullptr)
         editSourcesGlobalButton->setEnabled(hardwareConfig != nullptr);
+    const bool editingEnabled = addSequenceButton != nullptr && addSequenceButton->isEnabled();
     for (auto* si : sequenceInterfaces)
         for (auto* ci : si->getConditionInterfaces())
             ci->getCondition()->applyHardwareCatalog(hardwareConfig.get());
     for (auto* si : sequenceInterfaces)
         for (auto* ci : si->getConditionInterfaces())
+        {
             ci->onHardwareConfigChanged();
+            if (editingEnabled)
+                ci->enable();
+            else
+                ci->disable();
+        }
     protocol->createTrials();
     refreshConditionsTable();
     if (timeline != nullptr)
