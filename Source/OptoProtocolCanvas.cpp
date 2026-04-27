@@ -37,6 +37,96 @@ static const double kMaxVoltage = 5.0;
 /** Pad NIDAQ buffer to this many AO channels so trial-to-trial config does not resize tasks. */
 static const int kNidaqMinAnalogChannels = 2;
 
+class HardwareJsonEditorComponent : public Component, public Button::Listener
+{
+public:
+    HardwareJsonEditorComponent()
+        : saveButton("Save"), resetButton("Reset")
+    {
+        editor.setMultiLine(true);
+        editor.setReturnKeyStartsNewLine(true);
+        editor.setScrollbarsShown(true);
+        editor.setFont(Font(14.0f));
+        addAndMakeVisible(editor);
+
+        saveButton.addListener(this);
+        resetButton.addListener(this);
+        addAndMakeVisible(saveButton);
+        addAndMakeVisible(resetButton);
+    }
+
+    void setText(const String& text)
+    {
+        editor.setText(text, dontSendNotification);
+    }
+
+    String getText() const
+    {
+        return editor.getText();
+    }
+
+    std::function<void()> onSave;
+    std::function<void()> onReset;
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(8);
+        auto buttons = area.removeFromBottom(30);
+        saveButton.setBounds(buttons.removeFromRight(100));
+        buttons.removeFromRight(8);
+        resetButton.setBounds(buttons.removeFromRight(100));
+        area.removeFromBottom(8);
+        editor.setBounds(area);
+    }
+
+    void buttonClicked(Button* button) override
+    {
+        if (button == &saveButton)
+        {
+            if (onSave) onSave();
+            return;
+        }
+        if (button == &resetButton)
+        {
+            if (onReset) onReset();
+        }
+    }
+
+private:
+    TextEditor editor;
+    TextButton saveButton;
+    TextButton resetButton;
+};
+
+class ValidatingCloseDialogWindow : public DialogWindow
+{
+public:
+    ValidatingCloseDialogWindow(const String& title,
+                                Colour backgroundColour,
+                                std::function<bool()> validateClose_,
+                                std::function<void()> onClosed_)
+        : DialogWindow(title, backgroundColour, true),
+          validateClose(std::move(validateClose_)),
+          onClosed(std::move(onClosed_))
+    {
+    }
+
+    void closeButtonPressed() override
+    {
+        if (!validateClose || validateClose())
+        {
+            exitModalState(0);
+            setVisible(false);
+            if (onClosed)
+                onClosed();
+        }
+    }
+
+private:
+    std::function<bool()> validateClose;
+    std::function<void()> onClosed;
+};
+
 static bool trialIndexToWavelengthNm(Sequence* seq, int trialIndex, int& outWl)
 {
     int t = 0;
@@ -1458,6 +1548,13 @@ OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewp
     loadSourcesGlobalButton->setTooltip("Load a hardware JSON file (replaces the current source configuration).");
     loadSourcesGlobalButton->addListener(this);
     addAndMakeVisible(loadSourcesGlobalButton.get());
+
+    editSourcesGlobalButton = std::make_unique<TextButton>("editSourcesGlobal");
+    editSourcesGlobalButton->setButtonText("Edit Sources");
+    editSourcesGlobalButton->setTooltip("Edit the currently loaded hardware JSON.");
+    editSourcesGlobalButton->addListener(this);
+    editSourcesGlobalButton->setEnabled(false);
+    addAndMakeVisible(editSourcesGlobalButton.get());
     
     saveTableCsvButton = std::make_unique<TextButton>("saveTableCsv");
     saveTableCsvButton->setButtonText("Export Table");
@@ -1499,6 +1596,8 @@ void OptoProtocolInterface::resized()
     int leftMargin = 15;
     if (loadSourcesGlobalButton)
         loadSourcesGlobalButton->setBounds(leftMargin, 4, 112, 20);
+    if (editSourcesGlobalButton)
+        editSourcesGlobalButton->setBounds(leftMargin + 120, 4, 112, 20);
     int currentHeight = 30;
     for (auto interface : sequenceInterfaces)
     {
@@ -1529,6 +1628,11 @@ void OptoProtocolInterface::buttonClicked(Button* button)
     if (button == loadSourcesGlobalButton.get())
     {
         launchLoadHardwareJsonChooser();
+        return;
+    }
+    if (button == editSourcesGlobalButton.get())
+    {
+        launchEditHardwareJsonDialog();
         return;
     }
     if (button == saveTableCsvButton.get())
@@ -1707,9 +1811,10 @@ void OptoProtocolInterface::launchLoadHardwareJsonChooser()
         const File f = c.getResult();
         if (f != File())
         {
-            auto cfg = OptoHardwareConfig::parseFile(f);
+            const String jsonText = f.loadFileAsString();
+            auto cfg = OptoHardwareConfig::parseJson(jsonText);
             if (cfg != nullptr)
-                applyLoadedHardwareConfig(std::move(cfg), f.getFullPathName());
+                applyLoadedHardwareConfig(std::move(cfg), f.getFullPathName(), jsonText);
             else
                 AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Hardware JSON", "Could not parse the selected file.");
         }
@@ -1717,10 +1822,16 @@ void OptoProtocolInterface::launchLoadHardwareJsonChooser()
     });
 }
 
-void OptoProtocolInterface::applyLoadedHardwareConfig(std::unique_ptr<OptoHardwareConfig> cfg, const String& pathForXml)
+void OptoProtocolInterface::applyLoadedHardwareConfig(std::unique_ptr<OptoHardwareConfig> cfg,
+                                                      const String& pathForXml,
+                                                      const String& jsonText)
 {
     hardwareConfig = std::move(cfg);
     hardwareConfigPath = pathForXml;
+    if (jsonText.isNotEmpty())
+        hardwareConfigJsonText = jsonText;
+    if (editSourcesGlobalButton != nullptr)
+        editSourcesGlobalButton->setEnabled(hardwareConfig != nullptr);
     for (auto* si : sequenceInterfaces)
         for (auto* ci : si->getConditionInterfaces())
             ci->getCondition()->applyHardwareCatalog(hardwareConfig.get());
@@ -1739,6 +1850,108 @@ void OptoProtocolInterface::applyLoadedHardwareConfig(std::unique_ptr<OptoHardwa
         updateBounds(0);
         resized();
     });
+}
+
+void OptoProtocolInterface::launchEditHardwareJsonDialog()
+{
+    if (!hasHardwareConfig())
+    {
+        AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Edit Sources", "Load sources JSON before editing.");
+        return;
+    }
+
+    if (hardwareJsonEditorWindow != nullptr)
+    {
+        if (!hardwareJsonEditorWindow->isVisible())
+            hardwareJsonEditorWindow->setVisible(true);
+        hardwareJsonEditorWindow->toFront(true);
+        return;
+    }
+
+    if (hardwareConfigJsonText.isEmpty() && hardwareConfigPath.isNotEmpty())
+    {
+        const File f(hardwareConfigPath);
+        if (f.existsAsFile())
+            hardwareConfigJsonText = f.loadFileAsString();
+    }
+
+    hardwareJsonEditorOriginalText = hardwareConfigJsonText;
+    auto editor = std::make_unique<HardwareJsonEditorComponent>();
+    editor->setText(hardwareJsonEditorOriginalText);
+    editor->onSave = [this]()
+    {
+        if (hardwareJsonEditorWindow == nullptr)
+            return;
+        auto* c = dynamic_cast<HardwareJsonEditorComponent*>(hardwareJsonEditorWindow->getContentComponent());
+        if (c == nullptr)
+            return;
+        if (!tryApplyHardwareJsonText(c->getText(), true))
+            return;
+        hardwareJsonEditorWindow->exitModalState(0);
+        hardwareJsonEditorWindow = nullptr;
+    };
+    editor->onReset = [this]()
+    {
+        if (hardwareJsonEditorWindow == nullptr)
+            return;
+        if (auto* c = dynamic_cast<HardwareJsonEditorComponent*>(hardwareJsonEditorWindow->getContentComponent()))
+            c->setText(hardwareJsonEditorOriginalText);
+    };
+
+    hardwareJsonEditorWindow = std::make_unique<ValidatingCloseDialogWindow>(
+        "Edit Sources",
+        findColour(ThemeColours::componentBackground),
+        [this]() { return tryCloseHardwareJsonEditor(); },
+        [this]()
+        {
+            MessageManager::callAsync([this]() { hardwareJsonEditorWindow = nullptr; });
+        });
+    hardwareJsonEditorWindow->setUsingNativeTitleBar(true);
+    hardwareJsonEditorWindow->setResizable(true, true);
+    hardwareJsonEditorWindow->setContentOwned(editor.release(), true);
+    hardwareJsonEditorWindow->centreWithSize(760, 520);
+    hardwareJsonEditorWindow->setVisible(true);
+    hardwareJsonEditorWindow->enterModalState(true, nullptr, false);
+}
+
+bool OptoProtocolInterface::tryApplyHardwareJsonText(const String& jsonText, bool showInvalidAlert)
+{
+    auto cfg = OptoHardwareConfig::parseJson(jsonText);
+    if (cfg == nullptr)
+    {
+        if (showInvalidAlert)
+            AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon, "Edit Sources", "JSON is invalid. Fix the JSON before closing.");
+        return false;
+    }
+
+    applyLoadedHardwareConfig(std::move(cfg), String(), jsonText);
+    return true;
+}
+
+bool OptoProtocolInterface::tryCloseHardwareJsonEditor()
+{
+    if (hardwareJsonEditorWindow == nullptr)
+        return true;
+    auto* c = dynamic_cast<HardwareJsonEditorComponent*>(hardwareJsonEditorWindow->getContentComponent());
+    if (c == nullptr)
+        return true;
+
+    const String currentText = c->getText();
+    if (currentText == hardwareJsonEditorOriginalText)
+        return true;
+
+    const int choice = AlertWindow::showYesNoCancelBox(AlertWindow::QuestionIcon,
+                                                        "Edit Sources",
+                                                        "You have unsaved changes. Save before closing?",
+                                                        "Save",
+                                                        "Discard",
+                                                        "Cancel",
+                                                        this);
+    if (choice == 1)
+        return tryApplyHardwareJsonText(currentText, true);
+    if (choice == 2)
+        return true;
+    return false;
 }
 
 void OptoProtocolInterface::updateExportTableButtonState()
@@ -1784,6 +1997,8 @@ void OptoProtocolInterface::enable()
     addSequenceButton->setEnabled(true);
     if (loadSourcesGlobalButton)
         loadSourcesGlobalButton->setEnabled(true);
+    if (editSourcesGlobalButton)
+        editSourcesGlobalButton->setEnabled(hasHardwareConfig());
     updateExportTableButtonState();
 }
 
@@ -1799,6 +2014,8 @@ void OptoProtocolInterface::disable()
     addSequenceButton->setEnabled(false);
     if (loadSourcesGlobalButton)
         loadSourcesGlobalButton->setEnabled(false);
+    if (editSourcesGlobalButton)
+        editSourcesGlobalButton->setEnabled(false);
     if (saveTableCsvButton)
         saveTableCsvButton->setEnabled(false);
 }
@@ -2032,13 +2249,19 @@ void OptoProtocolInterface::loadProtocolFromXml(XmlElement* protocolElement)
     protocol->name = protocolElement->getStringAttribute("name", protocol->name);
     protocol->description = protocolElement->getStringAttribute("description");
     hardwareConfigPath = protocolElement->getStringAttribute("hardwareConfigPath");
+    hardwareConfigJsonText.clear();
     hardwareConfig.reset();
     if (hardwareConfigPath.isNotEmpty())
     {
         const File hf(hardwareConfigPath);
         if (hf.existsAsFile())
-            hardwareConfig = OptoHardwareConfig::parseFile(hf);
+        {
+            hardwareConfigJsonText = hf.loadFileAsString();
+            hardwareConfig = OptoHardwareConfig::parseJson(hardwareConfigJsonText);
+        }
     }
+    if (editSourcesGlobalButton != nullptr)
+        editSourcesGlobalButton->setEnabled(hardwareConfig != nullptr && addSequenceButton != nullptr && addSequenceButton->isEnabled());
     clearAllSequences();
     for (auto* seqEl = protocolElement->getFirstChildElement(); seqEl != nullptr; seqEl = seqEl->getNextElement())
     {
@@ -2529,14 +2752,20 @@ void OptoProtocolCanvas::buttonClicked(Button* button)
             currentProtocol->run();
             button->setButtonText("Pause");
             if (iface != nullptr)
+            {
                 iface->setTableRunning(true);
+                iface->disable();
+            }
         } else {
             protocolTimeline->pause();
             currentProtocol->pause();
             button->setButtonText("Run");
+            if (iface != nullptr)
+            {
+                iface->setTableRunning(false);
+                iface->enable();
+            }
         }
-        if (iface != nullptr)
-            iface->disable();
         
     } else if (button == resetButton.get())
     {

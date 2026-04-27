@@ -581,7 +581,12 @@ public:
     void getNewConditionArrays(Array<String>& names, Array<int>& sites, Array<int>& wavelengths) const;
 
     void launchLoadHardwareJsonChooser();
-    void applyLoadedHardwareConfig(std::unique_ptr<OptoHardwareConfig> cfg, const String& pathForXml);
+    void applyLoadedHardwareConfig(std::unique_ptr<OptoHardwareConfig> cfg,
+                                   const String& pathForXml,
+                                   const String& jsonText = {});
+    void launchEditHardwareJsonDialog();
+    bool tryApplyHardwareJsonText(const String& jsonText, bool showInvalidAlert);
+    bool tryCloseHardwareJsonEditor();
 
 private:
     void updateExportTableButtonState();
@@ -592,6 +597,7 @@ private:
     
     std::unique_ptr<TextButton> addSequenceButton;
     std::unique_ptr<TextButton> loadSourcesGlobalButton;
+    std::unique_ptr<TextButton> editSourcesGlobalButton;
     std::unique_ptr<TextButton> saveTableCsvButton;
     std::unique_ptr<Label> exportStatusLabel;
     String lastExportedCsvSnapshot;
@@ -601,6 +607,9 @@ private:
 
     std::unique_ptr<OptoHardwareConfig> hardwareConfig;
     String hardwareConfigPath;
+    String hardwareConfigJsonText;
+    String hardwareJsonEditorOriginalText;
+    std::unique_ptr<DialogWindow> hardwareJsonEditorWindow;
     
     std::unique_ptr<ConditionsTable> conditionsTable;
     
