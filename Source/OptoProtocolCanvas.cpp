@@ -1244,7 +1244,10 @@ String ConditionsTableModel::getStructureSignature() const
         }
         s << "b" << seq->baseline_interval.getFloatValue() << ";";
         s << (seq->randomize.getBoolValue() ? "1" : "0") << ";";
-        s << seq->min_iti.getFloatValue() << "," << seq->max_iti.getFloatValue() << "||";
+        s << seq->min_iti.getFloatValue() << "," << seq->max_iti.getFloatValue() << "!";
+        for (const auto& b : seq->getTrialBlockOrder())
+            s << std::get<0>(b) << ',' << std::get<1>(b) << ',' << std::get<2>(b) << ',' << std::get<3>(b) << ';';
+        s << "||";
     }
     return s;
 }
