@@ -60,6 +60,10 @@ void OptoProtocolGenerator::loadCustomParametersFromXml(XmlElement* parentElemen
 void OptoProtocolGenerator::sendConfigToNidaqOutput(const String& json)
 {
     GenericProcessor* nidaqOut = CoreServices::getProcessorByName("NIDAQ Output");
+    if (nidaqOut == nullptr)
+        nidaqOut = CoreServices::getProcessorByName("NIDAQOutput");
     if (nidaqOut != nullptr)
         sendConfigMessage(nidaqOut, json);
+    else
+        LOGE("Could not find NIDAQ Output processor to send trial config.");
 }

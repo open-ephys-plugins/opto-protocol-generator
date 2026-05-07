@@ -257,6 +257,25 @@ Condition::Condition(ParameterOwner* owner_,
                0.f,
                1.0e6f)
 {
+    if (availableSources_.isEmpty())
+        availableSources_.add("Source 1");
+    else
+        for (int i = 0; i < availableSources_.size(); ++i)
+            if (availableSources_[i].trim().isEmpty())
+                availableSources_.set(i, "Source " + String(i + 1));
+    if (sitesPerSource_.isEmpty())
+        sitesPerSource_.add(1);
+    else
+        for (int i = 0; i < sitesPerSource_.size(); ++i)
+            sitesPerSource_.set(i, jmax(1, sitesPerSource_[i]));
+
+    if (availableWavelengths_.isEmpty())
+        availableWavelengths_.add(638);
+
+    source.setCategories(availableSources_);
+    sitesPerSource = sitesPerSource_;
+    availableWavelengths = availableWavelengths_;
+
     // Initialize with no stimuli
     num_repeats.setKey((String(sequence->protocol->index) + ":" + String(sequence->index) + ":" + String(index) + ":num_repeats").toStdString());
     Parameter::registerParameter(&num_repeats);

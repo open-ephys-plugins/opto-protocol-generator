@@ -35,7 +35,22 @@ namespace
 static const double kSourceSampleRate = 30000.0;
 static const double kMaxVoltage = 5.0;
 /** Pad NIDAQ buffer to this many AO channels so trial-to-trial config does not resize tasks. */
-static const int kNidaqMinAnalogChannels = 2;
+static const int kNidaqMinAnalogChannels = 1;
+
+static int getPatternChannelFromRoot(const DynamicObject* root)
+{
+    if (root == nullptr)
+        return 0;
+
+    if (root->hasProperty("pulse"))
+        return (int) root->getProperty("pulse").getProperty("analogOutputChannel", 0);
+    if (root->hasProperty("sine"))
+        return (int) root->getProperty("sine").getProperty("analogOutputChannel", 0);
+    if (root->hasProperty("custom"))
+        return (int) root->getProperty("custom").getProperty("analogOutputChannel", 0);
+
+    return 0;
+}
 
 static int parseFirstIntegerAfterToken(const String& text, const String& token)
 {
@@ -319,10 +334,7 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
 
     if (hw == nullptr || ls == nullptr)
     {
-        if (s->type == PULSE_TRAIN || s->type == RAMP)
-            analogChannel = 0;
-        else
-            analogChannel = 1;
+        analogChannel = 0;
         maxVoltage = (float) kMaxVoltage;
     }
 
@@ -429,10 +441,7 @@ static String trialToNidaqJson(Sequence* seq, int trialIndex, const OptoHardware
     root->setProperty("sampleRate", kSourceSampleRate);
     root->setProperty("maxVoltage", kMaxVoltage);
     root->setProperty("playImmediately", true);
-    int minCh = kNidaqMinAnalogChannels;
-    if (hw != nullptr && !hw->isEmpty())
-        minCh = jmax(minCh, hw->maxAnalogOutputChannel() + 1);
-    root->setProperty("minAnalogChannels", minCh);
+    root->setProperty("minAnalogChannels", kNidaqMinAnalogChannels);
     if (seq->conditions.isEmpty())
         return JSON::toString(var(root.get()));
     if (trialIndex < 0 || trialIndex >= seq->getTotalTrials())
@@ -444,6 +453,8 @@ static String trialToNidaqJson(Sequence* seq, int trialIndex, const OptoHardware
     if (!trialIndexToWavelengthNm(seq, trialIndex, wlNm))
         wlNm = 638;
     addStimulusToPattern(s, s->condition, root.get(), hw, wlNm);
+    const int requiredChannels = jmax(kNidaqMinAnalogChannels, getPatternChannelFromRoot(root.get()) + 1);
+    root->setProperty("minAnalogChannels", requiredChannels);
     return JSON::toString(var(root.get()));
 }
 }
@@ -781,6 +792,11 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
                                              OptoProtocolInterface* parent_)
     : condition(condition_), stimulus(stimulus_), parent(parent_)
 {
+    if (condition == nullptr || stimulus == nullptr)
+    {
+        jassertfalse;
+        return;
+    }
     
     sourceEditor = std::make_unique<ComboBoxParameterEditor>(&condition->source);
     addAndMakeVisible(sourceEditor.get());
@@ -1964,7 +1980,7 @@ void OptoProtocolInterface::getNewConditionArrays(Array<String>& names, Array<in
     wavelengths.clear();
     if (!hasHardwareConfig())
     {
-        names.add("");
+        names.add("Source 1");
         sites.add(1);
         return;
     }
@@ -1973,12 +1989,19 @@ void OptoProtocolInterface::getNewConditionArrays(Array<String>& names, Array<in
         names.add(d.name);
         sites.add(d.is_np_opto ? kNpOptoSitesPerSource : 1);
     }
+    if (names.isEmpty())
+    {
+        names.add("Source 1");
+        sites.add(1);
+    }
     if (hardwareConfig->devices.size() > 0)
     {
         const auto& d0 = hardwareConfig->devices[0];
         if (d0.lightSources.size() > 0)
             wavelengths.add(d0.lightSources[0].wavelength);
     }
+    if (wavelengths.isEmpty())
+        wavelengths.add(638);
 }
 
 void OptoProtocolInterface::launchLoadHardwareJsonChooser()
