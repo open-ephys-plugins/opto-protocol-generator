@@ -1544,9 +1544,9 @@ void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int wi
         g.fillAll(c.withAlpha(0.35f));
     }
     else if (rowIsSelected)
-        g.fillAll(Colours::lightblue.withAlpha(0.3f));
+        g.fillAll(selectedRowColour);
     else if (rowNumber % 2 == 1)
-        g.fillAll(Colours::white.withAlpha(0.05f));
+        g.fillAll(alternateRowColour);
 }
 
 String ConditionsTableModel::getCellText(int rowNumber, int columnId) const
@@ -1572,8 +1572,8 @@ String ConditionsTableModel::getCellText(int rowNumber, int columnId) const
 
 void ConditionsTableModel::paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected)
 {
-    g.setColour(Colours::white);
-    g.setFont(Font(12.0f));
+    g.setColour(textColour);
+    g.setFont(FontOptions("Inter", "Regular", 12));
     g.drawText(getCellText(rowNumber, columnId), 4, 0, width - 6, height, Justification::centredLeft, true);
 }
 
@@ -1613,24 +1613,82 @@ String ConditionsTableModel::exportCsv()
     }
     return out;
 }
+class ConditionsTableLookAndFeel : public LookAndFeel_V4
+{
+public:
+    void drawTableHeaderBackground(Graphics& g, TableHeaderComponent& header) override
+    {
+        g.fillAll(header.findColour(TableHeaderComponent::backgroundColourId));
+
+        const auto outlineColour = header.findColour(TableHeaderComponent::outlineColourId);
+        g.setColour(outlineColour);
+        g.fillRect(header.getLocalBounds().removeFromBottom(1));
+
+        for (int i = header.getNumColumns(true); --i >= 0;)
+            g.fillRect(header.getColumnPosition(i).removeFromRight(1));
+    }
+    void drawTableHeaderColumn(Graphics& g, TableHeaderComponent& header,
+                               const String& columnName, int columnId,
+                               int width, int height,
+                               bool isMouseOver, bool isMouseDown,
+                               int columnFlags) override
+    {
+        auto highlightColour = header.findColour(TableHeaderComponent::highlightColourId);
+
+        if (isMouseDown)
+            g.fillAll(highlightColour);
+        else if (isMouseOver)
+            g.fillAll(highlightColour.withMultipliedAlpha(0.625f));
+
+        Rectangle<int> area(width, height);
+        area.reduce(4, 0);
+
+        if ((columnFlags & (TableHeaderComponent::sortedForwards | TableHeaderComponent::sortedBackwards)) != 0)
+        {
+            Path sortArrow;
+            sortArrow.addTriangle(0.0f, 0.0f,
+                                  0.5f, (columnFlags & TableHeaderComponent::sortedForwards) != 0 ? -0.8f : 0.8f,
+                                  1.0f, 0.0f);
+
+            g.setColour(header.findColour(TableHeaderComponent::textColourId).withAlpha(0.6f));
+            g.fillPath(sortArrow, sortArrow.getTransformToScaleToFit(area.removeFromRight(height / 2).reduced(2).toFloat(), true));
+        }
+
+        g.setColour(header.findColour(TableHeaderComponent::textColourId));
+        g.setFont(FontOptions("Inter", "Semi Bold", (float) height * 0.5f));
+        g.drawFittedText(columnName, area, Justification::centredLeft, 1);
+    }
+};
 
 ConditionsTable::ConditionsTable()
 {
+    tableLookAndFeel = std::make_unique<ConditionsTableLookAndFeel>();
+    const int columnFlags = TableHeaderComponent::notSortable;
     table.setModel(&model);
-    table.getHeader().addColumn("Trial", ColRow, 44, 36, 80);
-    table.getHeader().addColumn("Sequence", ColSequence, 62, 50, 80);
-    table.getHeader().addColumn("Condition", ColCondition, 88, 70, 120);
-    table.getHeader().addColumn("Source", ColProbe, 68, 56, 100);
-    table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120);
-    table.getHeader().addColumn("Site", ColSites, 26, 18, 45);
-    table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100);
-    table.getHeader().addColumn("ITI", ColITI, 29, 21, 42);
-    table.getHeader().addColumn("Start", ColStartTime, 62, 50, 100);
-    table.getHeader().addColumn("End", ColEndTime, 62, 50, 100);
-    table.getHeader().addColumn("Repeat", ColRepeat, 48, 40, 80);
+    table.getHeader().addColumn("Trial", ColRow, 44, 36, 80, columnFlags);
+    table.getHeader().addColumn("Sequence", ColSequence, 62, 50, 80, columnFlags);
+    table.getHeader().addColumn("Condition", ColCondition, 88, 70, 120, columnFlags);
+    table.getHeader().addColumn("Source", ColProbe, 68, 56, 100, columnFlags);
+    table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120, columnFlags);
+    table.getHeader().addColumn("Site", ColSites, 26, 18, 45, columnFlags);
+    table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100, columnFlags);
+    table.getHeader().addColumn("ITI", ColITI, 29, 21, 42, columnFlags);
+    table.getHeader().addColumn("Start", ColStartTime, 62, 50, 100, columnFlags);
+    table.getHeader().addColumn("End", ColEndTime, 62, 50, 100, columnFlags);
+    table.getHeader().addColumn("Repeat", ColRepeat, 48, 40, 80, columnFlags);
     table.setHeaderHeight(22);
     table.setRowHeight(30);
-    addAndMakeVisible(table);
+    table.getHeader().setLookAndFeel(tableLookAndFeel.get());
+    tableViewport.setViewedComponent(&table, false);
+    tableViewport.setScrollBarsShown(true, false);
+    tableViewport.setScrollBarThickness(5);
+    addAndMakeVisible(tableViewport);
+    applyThemeColours();
+    updateTableSize();
+}
+ConditionsTable::~ConditionsTable()
+{
+    table.getHeader().setLookAndFeel(nullptr);
 }
 
 void ConditionsTable::setProtocol(Protocol* p)
@@ -1641,6 +1699,7 @@ void ConditionsTable::setProtocol(Protocol* p)
 void ConditionsTable::refreshTable()
 {
     table.updateContent();
+    updateTableSize();
     table.repaint();
 }
 
@@ -1648,6 +1707,17 @@ void ConditionsTable::setActiveRow(int row)
 {
     activeRow = row;
     model.setActiveRow(row);
+    if (row >= 0)
+    {
+        const int rowTop = kHeaderHeight + row * kRowHeight;
+        const int rowBottom = rowTop + kRowHeight;
+        const int viewTop = tableViewport.getViewPositionY();
+        const int viewBottom = viewTop + tableViewport.getViewHeight();
+        if (rowTop < viewTop)
+            tableViewport.setViewPosition(0, rowTop);
+        else if (rowBottom > viewBottom)
+            tableViewport.setViewPosition(0, rowBottom - tableViewport.getViewHeight());
+    }
     table.repaint();
 }
 
@@ -1667,13 +1737,55 @@ void ConditionsTable::setRunning(bool running)
 
 int ConditionsTable::getPreferredHeight()
 {
-    int n = model.getNumRows();
-    return kHeaderHeight + n * kRowHeight;
+    return kViewportHeight;
 }
 
 void ConditionsTable::resized()
 {
-    table.setBounds(getLocalBounds());
+    tableViewport.setBounds(0, 0, getWidth(), jmin(kViewportHeight, getHeight()));
+    updateTableSize();
+}
+void ConditionsTable::colourChanged()
+{
+    applyThemeColours();
+}
+
+void ConditionsTable::lookAndFeelChanged()
+{
+    applyThemeColours();
+}
+
+void ConditionsTable::paintOverChildren(Graphics& g)
+{
+    g.setColour(findColour(ThemeColours::outline));
+    g.drawRect(tableViewport.getBounds(), 1);
+}
+void ConditionsTable::applyThemeColours()
+{
+    const Colour textColour = findColour(ThemeColours::defaultText);
+    const Colour outlineColour = findColour(ThemeColours::outline);
+    const Colour headerColour = findColour(ThemeColours::widgetBackground);
+    const Colour componentBackground = findColour(ThemeColours::componentBackground);
+    const bool lightTheme = componentBackground.getPerceivedBrightness() > 0.65f;
+    model.setTextColour(textColour);
+    model.setAlternateRowColour(textColour.withAlpha(lightTheme ? 0.10f : 0.05f));
+    model.setSelectedRowColour(findColour(ThemeColours::menuHighlightBackground).withAlpha(0.45f));
+    table.getHeader().setColour(TableHeaderComponent::textColourId, textColour);
+    table.getHeader().setColour(TableHeaderComponent::backgroundColourId, headerColour);
+    table.getHeader().setColour(TableHeaderComponent::outlineColourId, outlineColour);
+    table.getHeader().setColour(TableHeaderComponent::highlightColourId, findColour(ThemeColours::menuHighlightBackground).withAlpha(0.45f));
+    table.setColour(ListBox::textColourId, textColour);
+    table.setColour(ListBox::outlineColourId, outlineColour);
+    table.setColour(ListBox::backgroundColourId, componentBackground);
+    table.getHeader().repaint();
+    table.repaint();
+    repaint();
+}
+
+void ConditionsTable::updateTableSize()
+{
+    const int contentHeight = jmax(kViewportHeight, kHeaderHeight + model.getNumRows() * kRowHeight);
+    table.setSize(getWidth(), contentHeight);
 }
 
 String ConditionsTable::exportTableAsCsv()
@@ -1686,7 +1798,7 @@ int ConditionsTable::getNumRows()
     return model.getNumRows();
 }
 
-const int kConditionsTableWidth = 1025;
+const int kConditionsTableWidth = 651;
 const int kConditionsTableGap = 10;
 /** Sequences column width; table is placed immediately to its right. */
 const int kSequencesColumnWidth = 400;

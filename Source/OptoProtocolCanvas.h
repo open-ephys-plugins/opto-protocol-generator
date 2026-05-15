@@ -445,6 +445,9 @@ public:
     void paintRowBackground(Graphics& g, int rowNumber, int width, int height, bool rowIsSelected) override;
     void setActiveRow(int row) { activeRow = row; }
     void setRunning(bool r) { isRunning = r; }
+    void setTextColour(Colour colour) { textColour = colour; }
+    void setAlternateRowColour(Colour colour) { alternateRowColour = colour; }
+    void setSelectedRowColour(Colour colour) { selectedRowColour = colour; }
     /** Row index (0-based) for the trialNum-th row (1-based) of sequence seqIdx (1-based); -1 if not found. */
     int getRowIndexForSequenceAndTrial(int seqIdx, int trialNum) const;
     void paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected) override;
@@ -478,6 +481,9 @@ private:
     String lastStructureSignature;
     int activeRow;
     bool isRunning;
+    Colour textColour = Colours::white;
+    Colour alternateRowColour = Colours::white.withAlpha(0.05f);
+    Colour selectedRowColour = Colours::lightblue.withAlpha(0.3f);
 };
 
 /** Table listing all condition repeats (one row per trial). */
@@ -485,6 +491,7 @@ class ConditionsTable : public Component
 {
 public:
     ConditionsTable();
+    ~ConditionsTable() override;
     void setProtocol(Protocol* p);
     void refreshTable();
     int getPreferredHeight();
@@ -499,12 +506,20 @@ public:
     float getTotalProtocolDuration() { return model.getTotalProtocolDuration(); }
 private:
     void resized() override;
+    void colourChanged() override;
+    void lookAndFeelChanged() override;
+    void paintOverChildren(Graphics& g) override;
+    void applyThemeColours();
+    void updateTableSize();
+    std::unique_ptr<LookAndFeel_V4> tableLookAndFeel;
     TableListBox table;
+    Viewport tableViewport;
     ConditionsTableModel model;
     int activeRow = -1;
     bool isRunning = false;
     static const int kHeaderHeight = 22;
     static const int kRowHeight = 30;
+    static const int kViewportHeight = 800;
 };
 
 /**
