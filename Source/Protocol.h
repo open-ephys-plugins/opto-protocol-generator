@@ -303,6 +303,10 @@ public:
 
     /** Gets the duration for the next stimulus */
     float getTrialDuration(int trialIndex);
+    /** Total runtime duration for one shuffled trial block, including all stimuli and their sampled ITIs. */
+    float getTrialBlockDuration(int blockIndex) const;
+    /** Total sampled ITI for one shuffled trial block. */
+    float getTrialBlockIti(int blockIndex) const;
 
     /** Creates the trials (must be called before getStimulusForTrial). */
     void createTrials();
@@ -339,6 +343,9 @@ public:
 private:
     /** The parameter owner */
     ParameterOwner* owner;
+
+    /** First trial index for a shuffled trial block. */
+    int getFirstTrialIndexForBlock(int blockIndex) const;
 
     /** ITI values */
     Array<float> iti_values;

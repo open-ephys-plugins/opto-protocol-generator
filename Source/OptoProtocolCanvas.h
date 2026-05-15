@@ -345,6 +345,8 @@ public:
     /** Appends one condition + stimulus subtree from XML (used when loading). */
     void importConditionFromXml(XmlElement* conditionElement);
     void syncDeleteSequenceVisibility();
+    int getPreferredHeight() const;
+    void updateHeight();
     
 private:
     
@@ -364,6 +366,8 @@ private:
     
     const int conditionInterfaceHeight = kConditionInterfaceHeight;
     const int conditionInterfaceWidth = 365;
+    static constexpr int kBaseHeight = 230;
+    static constexpr int kConditionInterfaceGap = 10;
 
 };
 
@@ -448,6 +452,8 @@ public:
     void setTextColour(Colour colour) { textColour = colour; }
     void setAlternateRowColour(Colour colour) { alternateRowColour = colour; }
     void setSelectedRowColour(Colour colour) { selectedRowColour = colour; }
+    void markRowExecuted(int row);
+    void clearExecutedRows();
     /** Row index (0-based) for the trialNum-th row (1-based) of sequence seqIdx (1-based); -1 if not found. */
     int getRowIndexForSequenceAndTrial(int seqIdx, int trialNum) const;
     void paintCell(Graphics& g, int rowNumber, int columnId, int width, int height, bool rowIsSelected) override;
@@ -464,11 +470,25 @@ private:
     void rebuildRowOrder();
     String getStructureSignature() const;
     void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx, int& siteIdx) const;
+    int getRuntimeBlockIndexForRow(int row) const;
     String getConditionName(int seqIdx, int condIdx) const;
     String getProbeName(int seqIdx, int condIdx) const;
     String getWavelengthString(int seqIdx, int condIdx, int wavelengthIdx) const;
     String getSitesString(int seqIdx, int condIdx, int siteIdx) const;
     String getLightPowerString(int seqIdx, int condIdx) const;
+    Stimulus* getStimulusForRow(int row) const;
+    String getStimulusTypeString(int row) const;
+    String getStimulusParamsString(int row) const;
+    String getPulseWidthString(int row) const;
+    String getPulseFrequencyString(int row) const;
+    String getPulseCountString(int row) const;
+    String getPulseRampString(int row) const;
+    String getSineDurationString(int row) const;
+    String getSineFrequencyString(int row) const;
+    String getRampPlateauString(int row) const;
+    String getRampOnsetString(int row) const;
+    String getRampOffsetString(int row) const;
+    String getRampProfileString(int row) const;
     String getITIString(int row) const;
     String getStartTimeString(int row) const;
     String getEndTimeString(int row) const;
@@ -476,11 +496,10 @@ private:
     Protocol* protocol;
     /** Cached (seqIdx+1, condIdx+1, repeatIdx+1, wavelengthIdx, siteIdx) per row, with randomize applied per sequence. */
     Array<std::tuple<int, int, int, int, int>> rowOrder;
-    /** Per-row sampled ITI (s) for table display; baseline rows use 0. */
-    Array<float> rowIti;
     String lastStructureSignature;
     int activeRow;
     bool isRunning;
+    Array<int> executedRows;
     Colour textColour = Colours::white;
     Colour alternateRowColour = Colours::white.withAlpha(0.05f);
     Colour selectedRowColour = Colours::lightblue.withAlpha(0.3f);
@@ -499,6 +518,8 @@ public:
     void setActiveRow(int row);
     /** Set active row from sequence index (1-based) and trial number (1-based). */
     void setActiveSequenceAndTrial(int seqIdx, int trialNum);
+    void markActiveRowExecuted();
+    void clearExecutedRows();
     /** Whether the protocol is currently running (timeline updating). */
     void setRunning(bool running);
     String exportTableAsCsv();
@@ -584,10 +605,14 @@ public:
     void refreshConditionsTable();
     /** Set the active trial in the table (seqIdx 1-based, trialNum 1-based). */
     void setActiveTrial(int seqIdx, int trialNum);
+    void markActiveTrialComplete();
+    void clearExecutedTrials();
     /** Set whether the protocol is running (table highlights active row when true). */
     void setTableRunning(bool running);
     /** Total protocol duration matching the conditions table (timeline should use this). */
     float getTableTotalDuration();
+    /** Writes the current stimulus table to a recording directory if rows are available. */
+    bool writeStimulusTableCsv(const File& directory, const String& reasonTag);
 
     bool hasHardwareConfig() const { return hardwareConfig != nullptr; }
     const OptoHardwareConfig* getHardwareConfig() const { return hardwareConfig.get(); }
@@ -683,10 +708,15 @@ public:
     void saveCustomParametersToXml(XmlElement* xml) override;
     void loadCustomParametersFromXml(XmlElement* xml) override;
 
+    /** Called at start and stop of recording */
+	void startRecording(File recordingDirectory);
+    void stopRecording();
+
 private:
 
     OptoProtocolInterface* getCurrentInterface();
     void applySelectedProtocol();
+    void writeCurrentStimulusTableForRecording(const String& reasonTag);
 
 
     /** ComboBox for selecting a protocol */
@@ -721,6 +751,9 @@ private:
 
     /** Pointer to the processor class */
     OptoProtocolGenerator* processor;
+
+    bool isRecording = false;
+    File activeRecordingDirectory;
 
     /** Generates an assertion if this class leaks */
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolCanvas);

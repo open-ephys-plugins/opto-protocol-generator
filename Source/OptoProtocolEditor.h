@@ -27,6 +27,8 @@
 
 #include <VisualizerEditorHeaders.h>
 
+class OptoProtocolCanvas;
+
 /** 
 	The editor for the OptoProtocolGenerator
 
@@ -46,7 +48,15 @@ public:
 	/** Creates the canvas */
 	Visualizer* createNewCanvas();
 
+	/** Called when recording starts */
+	void startRecording() override;
+
+	/** Called when recording starts */
+	void stopRecording() override;
+
 private:
+
+	OptoProtocolCanvas* thisCanvas = nullptr;
 
 	/** Generates an assertion if this class leaks */
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolEditor);

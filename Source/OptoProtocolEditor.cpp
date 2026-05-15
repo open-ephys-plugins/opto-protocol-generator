@@ -38,5 +38,25 @@ OptoProtocolEditor::OptoProtocolEditor(GenericProcessor* p)
 
 Visualizer* OptoProtocolEditor::createNewCanvas()
 {
-    return new OptoProtocolCanvas((OptoProtocolGenerator*) getProcessor());;
+    thisCanvas = new OptoProtocolCanvas((OptoProtocolGenerator*) getProcessor());
+	return thisCanvas;
+}
+
+
+
+void OptoProtocolEditor::startRecording()
+{
+
+    File parentDirectory = CoreServices::getRecordingParentDirectory().getChildFile(CoreServices::getRecordingDirectoryName());
+
+    File recordingDirectory = parentDirectory.getChildFile(getProcessor()->getName() + " " + String(getProcessor()->getNodeId()));
+
+    thisCanvas->startRecording(recordingDirectory);
+}
+
+void OptoProtocolEditor::stopRecording()
+{
+
+    thisCanvas->stopRecording();
+
 }
