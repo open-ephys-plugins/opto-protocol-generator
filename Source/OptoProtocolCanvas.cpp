@@ -1681,7 +1681,7 @@ ConditionsTable::ConditionsTable()
     table.getHeader().setLookAndFeel(tableLookAndFeel.get());
     tableViewport.setViewedComponent(&table, false);
     tableViewport.setScrollBarsShown(true, false);
-    tableViewport.setScrollBarThickness(5);
+    tableViewport.setScrollBarThickness(15);
     addAndMakeVisible(tableViewport);
     applyThemeColours();
     updateTableSize();
@@ -1742,7 +1742,7 @@ int ConditionsTable::getPreferredHeight()
 
 void ConditionsTable::resized()
 {
-    tableViewport.setBounds(0, 0, getWidth(), jmin(kViewportHeight, getHeight()));
+    tableViewport.setBounds(0, 0, getWidth(), getHeight());
     updateTableSize();
 }
 void ConditionsTable::colourChanged()
@@ -1784,7 +1784,7 @@ void ConditionsTable::applyThemeColours()
 
 void ConditionsTable::updateTableSize()
 {
-    const int contentHeight = jmax(kViewportHeight, kHeaderHeight + model.getNumRows() * kRowHeight);
+    const int contentHeight = jmax(getHeight(), kHeaderHeight + model.getNumRows() * kRowHeight);
     table.setSize(getWidth(), contentHeight);
 }
 
@@ -1798,7 +1798,7 @@ int ConditionsTable::getNumRows()
     return model.getNumRows();
 }
 
-const int kConditionsTableWidth = 651;
+const int kConditionsTableWidth = 660;
 const int kConditionsTableGap = 10;
 /** Sequences column width; table is placed immediately to its right. */
 const int kSequencesColumnWidth = 400;
@@ -1808,6 +1808,8 @@ const int kSaveCsvButtonW = 150;
 const int kExportStatusLabelGap = 8;
 const int kExportStatusLabelWidth = 280;
 const int kConditionsTableTop = kSaveCsvButtonTop + kSaveCsvButtonH + 4;
+const int kConditionsTableBottomMargin = 10;
+const int kConditionsTableMinimumHeight = 120;
 
 OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewport_)
     : ParameterOwner(ParameterOwner::OTHER), viewport(viewport_)
@@ -1867,7 +1869,12 @@ void OptoProtocolInterface::updateBounds(int expandBy)
     int sequencesHeight = 90;
     for (auto interface : sequenceInterfaces)
         sequencesHeight += interface->getHeight();
-    int tableHeight = kConditionsTableTop + (conditionsTable ? conditionsTable->getPreferredHeight() : 0);
+    const int visibleHeight = viewport != nullptr ? viewport->getHeight() : 0;
+    const int fallbackHeight = conditionsTable ? conditionsTable->getPreferredHeight() : 0;
+    const int conditionsTableHeight = visibleHeight > 0
+        ? jmax(kConditionsTableMinimumHeight, visibleHeight - kConditionsTableTop - kConditionsTableBottomMargin)
+        : fallbackHeight;
+    int tableHeight = kConditionsTableTop + conditionsTableHeight;
     int totalHeight = jmax(sequencesHeight, tableHeight);
     int currentScrollDistance = viewport->getViewPositionY();
     setBounds(0, 0, getWidth(), totalHeight);
@@ -1895,7 +1902,13 @@ void OptoProtocolInterface::resized()
         exportStatusLabel->setBounds(tableX + kSaveCsvButtonW + kExportStatusLabelGap, kSaveCsvButtonTop,
                                        kExportStatusLabelWidth, kSaveCsvButtonH);
     if (conditionsTable)
-        conditionsTable->setBounds(tableX, kConditionsTableTop, kConditionsTableWidth, conditionsTable->getPreferredHeight());
+    {
+        const int visibleHeight = viewport != nullptr ? viewport->getHeight() : 0;
+        const int tableHeight = visibleHeight > 0
+            ? jmax(kConditionsTableMinimumHeight, visibleHeight - kConditionsTableTop - kConditionsTableBottomMargin)
+            : conditionsTable->getPreferredHeight();
+        conditionsTable->setBounds(tableX, kConditionsTableTop, kConditionsTableWidth, tableHeight);
+    }
 }
 
 void OptoProtocolInterface::paint(Graphics& g)
@@ -3024,6 +3037,8 @@ void OptoProtocolCanvas::resized()
     {
         auto* pi = protocolInterfaces[selId - 1];
         pi->setSize(viewport->getMaximumVisibleWidth(), pi->getHeight());
+        pi->updateBounds(0);
+        pi->resized();
     }
 
 }
