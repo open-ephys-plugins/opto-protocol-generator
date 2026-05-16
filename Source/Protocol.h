@@ -236,8 +236,13 @@ public:
     /** The name of the stimulation source (e.g. laser) */
     CategoricalParameter source;
 
-    /** Pulse power (microwatts) */
-    FloatParameter pulse_power;
+    /** Pulse powers (microwatts) */
+    OwnedArray<FloatParameter> pulse_powers;
+
+    int getNumPulsePowers() const { return jmax(1, activePulsePowerCount); }
+    float getPulsePower(int index) const;
+    String getPulsePowersString() const;
+    void setPulsePowers(const Array<float>& powers);
 
     /** Stimulation sites (if the source has multiple emission sites) */
     std::unique_ptr<SelectedChannelsParameter> sites;
@@ -267,6 +272,8 @@ private:
 
     /** Generate a unique parameter key */
     std::string generateParameterKey(const String& name);
+    FloatParameter* createPulsePowerParameter(int powerIndex, float defaultValue);
+    int activePulsePowerCount = 0;
     
     /** The parameter owner */
     ParameterOwner* owner;
@@ -283,6 +290,7 @@ private:
 class Sequence
 {
 public:
+    using TrialBlock = std::tuple<int, int, int, int, int>;
 	/** The class constructor, used to initialize any members.*/
 	Sequence(ParameterOwner* owner_, Protocol* protocol_);
 
@@ -313,8 +321,10 @@ public:
     /** Stimulus for trial index (0-based) in execution order; requires createTrials() first. */
     Stimulus* getStimulusForTrial(int trialIndex) const;
 
-    /** (condition, repeat, wavelength, site) 0-based indices; same order as conditions table rows after createTrials(). */
-    const std::vector<std::tuple<int, int, int, int>>& getTrialBlockOrder() const { return trial_block_order; }
+    /** (condition, repeat, power, wavelength, site) 0-based indices; same order as conditions table rows after createTrials(). */
+    const std::vector<TrialBlock>& getTrialBlockOrder() const { return trial_block_order; }
+    float getPulsePowerForTrial(int trialIndex) const;
+    float getTrialBlockPulsePower(int blockIndex) const;
 
     /** Baseline interval in seconds (delay before start of stimulation) */
     FloatParameter baseline_interval;
@@ -357,7 +367,7 @@ private:
     Array<int> order;
 
     /** Shuffled block schedule matching ConditionsTableModel row order (excluding baseline rows). */
-    std::vector<std::tuple<int, int, int, int>> trial_block_order;
+    std::vector<TrialBlock> trial_block_order;
     
 };
 

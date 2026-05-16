@@ -235,6 +235,29 @@ public:
 
 };
 
+class PulsePowersEditor : public Component,
+                          private TextEditor::Listener
+{
+public:
+    PulsePowersEditor(Condition* condition, OptoProtocolInterface* parent);
+    ~PulsePowersEditor() override;
+    void resized() override;
+    void parameterEnabled(bool enabled);
+    void refreshText();
+    void refreshLabel();
+
+private:
+    void textEditorReturnKeyPressed(TextEditor& editor) override;
+    void textEditorFocusLost(TextEditor& editor) override;
+    void commitText();
+    Array<float> parsePowers(const String& text) const;
+    String getSelectedSourceUnits() const;
+
+    Condition* condition = nullptr;
+    OptoProtocolInterface* parent = nullptr;
+    Label label;
+    TextEditor editor;
+};
 
 /**
 * Interface for editing an opto condition
@@ -283,7 +306,7 @@ protected:
     std::unique_ptr<TextButton> loadJsonButton;
     std::unique_ptr<SelectedChannelsParameterEditor> siteEditor;
     std::unique_ptr<ColourSelectorWidget> colourSelectorWidget;
-    std::unique_ptr<BoundedValueParameterEditor> pulsePowerEditor;
+    std::unique_ptr<PulsePowersEditor> pulsePowersEditor;
     std::unique_ptr<BoundedValueParameterEditor> numRepeatsEditor;
     
     std::unique_ptr<PulseTrainInterface> pulseTrainInterface;
@@ -469,13 +492,13 @@ private:
     String getCellText(int rowNumber, int columnId) const;
     void rebuildRowOrder();
     String getStructureSignature() const;
-    void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx, int& siteIdx) const;
+    void rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& powerIdx, int& wavelengthIdx, int& siteIdx) const;
     int getRuntimeBlockIndexForRow(int row) const;
     String getConditionName(int seqIdx, int condIdx) const;
     String getProbeName(int seqIdx, int condIdx) const;
     String getWavelengthString(int seqIdx, int condIdx, int wavelengthIdx) const;
     String getSitesString(int seqIdx, int condIdx, int siteIdx) const;
-    String getLightPowerString(int seqIdx, int condIdx) const;
+    String getLightPowerString(int seqIdx, int condIdx, int powerIdx) const;
     Stimulus* getStimulusForRow(int row) const;
     String getStimulusTypeString(int row) const;
     String getStimulusParamsString(int row) const;
@@ -494,8 +517,8 @@ private:
     String getEndTimeString(int row) const;
     String getTrialString(int row) const;
     Protocol* protocol;
-    /** Cached (seqIdx+1, condIdx+1, repeatIdx+1, wavelengthIdx, siteIdx) per row, with randomize applied per sequence. */
-    Array<std::tuple<int, int, int, int, int>> rowOrder;
+    /** Cached (seqIdx+1, condIdx+1, repeatIdx+1, powerIdx, wavelengthIdx, siteIdx) per row, with randomize applied per sequence. */
+    Array<std::tuple<int, int, int, int, int, int>> rowOrder;
     String lastStructureSignature;
     int activeRow;
     bool isRunning;
@@ -717,6 +740,7 @@ private:
     OptoProtocolInterface* getCurrentInterface();
     void applySelectedProtocol();
     void writeCurrentStimulusTableForRecording(const String& reasonTag);
+    int getGlobalTrialNumber(int sequenceIndex, int sequenceTrialNumber) const;
 
 
     /** ComboBox for selecting a protocol */

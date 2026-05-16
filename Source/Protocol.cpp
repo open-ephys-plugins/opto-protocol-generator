@@ -247,15 +247,7 @@ Condition::Condition(ParameterOwner* owner_,
               "Source",
               "The source of the optogenetic stimulation",
               availableSources_,
-              0),
-    pulse_power(owner_, Parameter::VISUALIZER_SCOPE,
-               "pulse_power",
-               "Light power",
-               "Peak output power (scales using hardware JSON power/voltage table)",
-               "",
-               10.f,
-               0.f,
-               1.0e6f)
+              0)
 {
     if (availableSources_.isEmpty())
         availableSources_.add("Source 1");
@@ -297,8 +289,8 @@ Condition::Condition(ParameterOwner* owner_,
     Parameter::registerParameter(sites.get());
     source.setKey(generateParameterKey("source"));
     Parameter::registerParameter(&source);
-    pulse_power.setKey(generateParameterKey("pulse_power"));
-    Parameter::registerParameter(&pulse_power);
+    createPulsePowerParameter(0, 10.f);
+    activePulsePowerCount = 1;
 
     LOGD("Sites per source: ", sitesPerSource[0]);
 }
@@ -339,6 +331,71 @@ void Condition::removeWavelength(int wavelength)
     int wavelengthIndex = availableWavelengths.indexOf(wavelength);
     if (wavelengthIndex != -1)
         availableWavelengths.remove(wavelengthIndex);
+}
+
+FloatParameter* Condition::createPulsePowerParameter(int powerIndex, float defaultValue)
+{
+    auto* parameter = new FloatParameter(owner,
+                                         Parameter::VISUALIZER_SCOPE,
+                                         "pulse_power_" + String(powerIndex + 1),
+                                         powerIndex == 0 ? "Light power" : "Light power " + String(powerIndex + 1),
+                                         "Peak output power (scales using hardware JSON power/voltage table)",
+                                         "",
+                                         defaultValue,
+                                         0.f,
+                                         1.0e6f);
+    parameter->setKey(generateParameterKey("pulse_power_" + String(powerIndex + 1)));
+    Parameter::registerParameter(parameter);
+    pulse_powers.add(parameter);
+    return parameter;
+}
+
+float Condition::getPulsePower(int index) const
+{
+    if (pulse_powers.isEmpty())
+        return 10.f;
+    const int clampedIndex = jlimit(0, jmax(0, getNumPulsePowers() - 1), index);
+    if (auto* parameter = pulse_powers[clampedIndex])
+        return parameter->getFloatValue();
+    return 10.f;
+}
+static String getMinimalFloatString(float value)
+{
+    String text(value, 6);
+    while (text.containsChar('.') && text.endsWithChar('0'))
+        text = text.dropLastCharacters(1);
+    if (text.endsWithChar('.'))
+        text = text.dropLastCharacters(1);
+    return text == "-0" ? "0" : text;
+}
+
+String Condition::getPulsePowersString() const
+{
+    String text;
+    for (int i = 0; i < getNumPulsePowers(); ++i)
+    {
+        if (i > 0)
+            text << ", ";
+        text << getMinimalFloatString(getPulsePower(i));
+    }
+    return text;
+}
+
+void Condition::setPulsePowers(const Array<float>& powers)
+{
+    Array<float> sanitized;
+    for (auto power : powers)
+        sanitized.add(jlimit(0.0f, 1.0e6f, power));
+    if (sanitized.isEmpty())
+        sanitized.add(getPulsePower(0));
+
+    for (int i = 0; i < sanitized.size(); ++i)
+    {
+        if (i >= pulse_powers.size())
+            createPulsePowerParameter(i, sanitized[i]);
+        pulse_powers[i]->setNextValue(sanitized[i], false);
+    }
+    activePulsePowerCount = sanitized.size();
 }
 
 void Condition::applyHardwareCatalog(const OptoHardwareConfig* cfg)
@@ -412,9 +469,10 @@ int Condition::getTotalTrials()
     int numRepeats = num_repeats.getIntValue();
     int numSites = sites->getArrayValue().size();
     int numWavelengths = availableWavelengths.size();
+    int numPowers = getNumPulsePowers();
     int nStim = stimuli.size();
     if (nStim == 0) return 0;
-    return numRepeats * numSites * numWavelengths * nStim;
+    return numRepeats * numPowers * numSites * numWavelengths * nStim;
 }
 
 Sequence::Sequence(ParameterOwner* owner_, Protocol* protocol_)
@@ -501,7 +559,7 @@ void Sequence::createTrials()
     stimuli.clear();
     trial_block_order.clear();
 
-    std::vector<std::tuple<int, int, int, int>> blocks;
+    std::vector<Sequence::TrialBlock> blocks;
 
     for (int c = 0; c < conditions.size(); ++c)
     {
@@ -509,13 +567,15 @@ void Sequence::createTrials()
         int numRepeats = condition->num_repeats.getIntValue();
         int numSites = condition->sites->getArrayValue().size();
         int numWavelengths = condition->availableWavelengths.size();
+        int numPowers = condition->getNumPulsePowers();
 
-        LOGD("Condition ", condition->index, " has ", numRepeats, " repeats and ", numSites, " sites and ", condition->stimuli.size(), " stimuli");
+        LOGD("Condition ", condition->index, " has ", numRepeats, " repeats and ", numPowers, " powers and ", numSites, " sites and ", condition->stimuli.size(), " stimuli");
 
         for (int i = 0; i < numRepeats; ++i)
-            for (int w = 0; w < numWavelengths; ++w)
-                for (int j = 0; j < numSites; ++j)
-                    blocks.push_back(std::make_tuple(c, i, w, j));
+            for (int p = 0; p < numPowers; ++p)
+                for (int w = 0; w < numWavelengths; ++w)
+                    for (int j = 0; j < numSites; ++j)
+                        blocks.push_back(std::make_tuple(c, i, p, w, j));
     }
 
     if (randomize.getBoolValue() && blocks.size() > 1)
@@ -566,6 +626,36 @@ float Sequence::getTrialDuration(int trialIndex)
     if (idx < 0 || idx >= stimuli.size() || trialIndex >= iti_values.size())
         return 0.0f;
     return stimuli[idx]->getTotalTime() + iti_values[trialIndex];
+}
+
+float Sequence::getPulsePowerForTrial(int trialIndex) const
+{
+    if (trialIndex < 0)
+        return 10.f;
+
+    int trialCount = 0;
+    for (int blockIndex = 0; blockIndex < (int) trial_block_order.size(); ++blockIndex)
+    {
+        const int conditionIndex = std::get<0>(trial_block_order[blockIndex]);
+        if (conditionIndex < 0 || conditionIndex >= conditions.size())
+            continue;
+        const int numStimuli = conditions[conditionIndex]->stimuli.size();
+        if (trialIndex < trialCount + numStimuli)
+            return getTrialBlockPulsePower(blockIndex);
+        trialCount += numStimuli;
+    }
+    return 10.f;
+}
+
+float Sequence::getTrialBlockPulsePower(int blockIndex) const
+{
+    if (blockIndex < 0 || blockIndex >= (int) trial_block_order.size())
+        return 10.f;
+    const int conditionIndex = std::get<0>(trial_block_order[blockIndex]);
+    const int powerIndex = std::get<2>(trial_block_order[blockIndex]);
+    if (conditionIndex < 0 || conditionIndex >= conditions.size())
+        return 10.f;
+    return conditions[conditionIndex]->getPulsePower(powerIndex);
 }
 
 int Sequence::getFirstTrialIndexForBlock(int blockIndex) const

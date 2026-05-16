@@ -293,7 +293,7 @@ static bool trialIndexToWavelengthNm(Sequence* seq, int trialIndex, int& outWl)
         const int nStim = jmax(1, seq->conditions[c]->stimuli.size());
         if (trialIndex < t + nStim)
         {
-            const int widx = std::get<2>(blocks[bi]);
+            const int widx = std::get<3>(blocks[bi]);
             Condition* cond = seq->conditions[c];
             if (widx >= 0 && widx < cond->availableWavelengths.size())
                 outWl = cond->availableWavelengths[widx];
@@ -307,7 +307,7 @@ static bool trialIndexToWavelengthNm(Sequence* seq, int trialIndex, int& outWl)
 }
 
 static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patternRoot,
-                                 const OptoHardwareConfig* hw, int wavelengthNm)
+                                 const OptoHardwareConfig* hw, int wavelengthNm, float pulsePower)
 {
     int analogChannel = 0;
     float maxVoltage = (float) 5.0f;
@@ -316,7 +316,6 @@ static void addStimulusToPattern(Stimulus* s, Condition* c, DynamicObject* patte
     {
         // getFloatValue can synchronously run listeners that replace/reallocate the hardware
         // config; never hold a light-source pointer from findLightSource across that call.
-        const float pulsePower = c->pulse_power.getFloatValue();
         const int di = jlimit(0, (int) hw->devices.size() - 1, c->source.getSelectedIndex());
         ls = hw->findLightSource(di, wavelengthNm);
         if (ls != nullptr)
@@ -418,7 +417,7 @@ static String trialToNidaqJson(Sequence* seq, int trialIndex, const OptoHardware
     int wlNm = 638;
     if (!trialIndexToWavelengthNm(seq, trialIndex, wlNm))
         wlNm = 638;
-    addStimulusToPattern(s, s->condition, root.get(), hw, wlNm);
+    addStimulusToPattern(s, s->condition, root.get(), hw, wlNm, seq->getPulsePowerForTrial(trialIndex));
     const int requiredChannels = jmax(2, getPatternChannelFromRoot(root.get()) + 1);
     root->setProperty("minAnalogChannels", requiredChannels);
     return JSON::toString(var(root.get()));
@@ -754,6 +753,119 @@ void RemoveConditionButton::colourChanged()
     setImages(&normalDrawable, &overDrawable, nullptr, nullptr, nullptr);
 }
 
+PulsePowersEditor::PulsePowersEditor(Condition* condition_, OptoProtocolInterface* parent_)
+    : condition(condition_), parent(parent_), label("pulsePowersLabel", "Light powers")
+{
+    label.setFont(FontOptions("Inter", "Regular", 13.5));
+    label.setJustificationType(Justification::centredLeft);
+    addAndMakeVisible(label);
+
+    editor.setMultiLine(false);
+    editor.setReturnKeyStartsNewLine(false);
+    editor.setSelectAllWhenFocused(true);
+    editor.setInputRestrictions(0, "0123456789., ");
+    editor.setFont(FontOptions("Inter", "Regular", 13.5));
+    editor.addListener(this);
+    addAndMakeVisible(editor);
+    refreshLabel();
+    refreshText();
+}
+
+PulsePowersEditor::~PulsePowersEditor()
+{
+    editor.removeListener(this);
+}
+
+void PulsePowersEditor::resized()
+{
+    editor.setBounds(0, 0, 64, 20);
+    label.setBounds(72, 0, jmax(0, getWidth() - 72), 20);
+}
+
+void PulsePowersEditor::parameterEnabled(bool enabled)
+{
+    label.setEnabled(enabled);
+    editor.setEnabled(enabled);
+}
+
+void PulsePowersEditor::refreshText()
+{
+    if (condition != nullptr)
+        editor.setText(condition->getPulsePowersString(), dontSendNotification);
+}
+
+void PulsePowersEditor::refreshLabel()
+{
+    String labelText = "Light powers";
+    const String units = getSelectedSourceUnits();
+    if (units.isNotEmpty())
+        labelText << " (" << units << ")";
+    label.setText(labelText, dontSendNotification);
+}
+
+String PulsePowersEditor::getSelectedSourceUnits() const
+{
+    if (condition == nullptr || parent == nullptr || !parent->hasHardwareConfig())
+        return {};
+
+    const OptoHardwareConfig* cfg = parent->getHardwareConfig();
+    if (cfg == nullptr || cfg->isEmpty())
+        return {};
+
+    const int deviceIndex = jlimit(0, (int) cfg->devices.size() - 1, condition->source.getSelectedIndex());
+    if (condition->availableWavelengths.size() > 0)
+    {
+        if (const auto* lightSource = cfg->findLightSource(deviceIndex, condition->availableWavelengths[0]))
+            return lightSource->outputUnits;
+    }
+
+    const auto& device = cfg->devices[deviceIndex];
+    for (const auto& lightSource : device.lightSources)
+        if (lightSource.outputUnits.isNotEmpty())
+            return lightSource.outputUnits;
+
+    return {};
+}
+
+Array<float> PulsePowersEditor::parsePowers(const String& text) const
+{
+    Array<float> powers;
+    StringArray tokens;
+    tokens.addTokens(text, ",", "");
+    for (auto token : tokens)
+    {
+        token = token.trim();
+        if (token.isNotEmpty())
+            powers.add(token.getFloatValue());
+    }
+    return powers;
+}
+
+void PulsePowersEditor::commitText()
+{
+    if (condition == nullptr)
+        return;
+    Array<float> powers = parsePowers(editor.getText());
+    if (powers.isEmpty())
+        powers.add(condition->getPulsePower(0));
+    condition->setPulsePowers(powers);
+    refreshText();
+    if (parent != nullptr)
+        parent->parameterChangeRequest(nullptr);
+}
+
+void PulsePowersEditor::textEditorReturnKeyPressed(TextEditor& textEditor)
+{
+    if (&textEditor == &editor)
+        commitText();
+}
+
+void PulsePowersEditor::textEditorFocusLost(TextEditor& textEditor)
+{
+    if (&textEditor == &editor)
+        commitText();
+}
+
 OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* stimulus_,
                                              OptoProtocolInterface* parent_)
     : condition(condition_), stimulus(stimulus_), parent(parent_)
@@ -780,8 +892,8 @@ OptoConditionInterface::OptoConditionInterface(Condition* condition_, Stimulus* 
     colourSelectorWidget->rebuildFromConfig();
     colourSelectorWidget->syncFromCondition();
     addAndMakeVisible(colourSelectorWidget.get());
-    pulsePowerEditor = std::make_unique<BoundedValueParameterEditor>(&condition->pulse_power);
-    addAndMakeVisible(pulsePowerEditor.get());
+    pulsePowersEditor = std::make_unique<PulsePowersEditor>(condition, parent);
+    addAndMakeVisible(pulsePowersEditor.get());
     numRepeatsEditor = std::make_unique<BoundedValueParameterEditor>(&condition->num_repeats);
     addAndMakeVisible(numRepeatsEditor.get());
     
@@ -846,10 +958,11 @@ void OptoConditionInterface::refreshSourceLoadUi()
         colourSelectorWidget->setVisible(hw);
         colourSelectorWidget->setInterceptsMouseClicks(hw, hw);
     }
-    if (pulsePowerEditor != nullptr)
+    if (pulsePowersEditor != nullptr)
     {
-        pulsePowerEditor->setVisible(hw);
-        pulsePowerEditor->setInterceptsMouseClicks(hw, hw);
+        pulsePowersEditor->setVisible(hw);
+        pulsePowersEditor->setInterceptsMouseClicks(hw, hw);
+        pulsePowersEditor->refreshLabel();
     }
 }
 
@@ -870,6 +983,8 @@ void OptoConditionInterface::onHardwareConfigChanged()
         colourSelectorWidget->rebuildFromConfig();
         colourSelectorWidget->syncFromCondition();
     }
+    if (pulsePowersEditor != nullptr)
+        pulsePowersEditor->refreshLabel();
     resized();
 }
     
@@ -881,7 +996,7 @@ void OptoConditionInterface::resized()
         loadJsonButton->setBounds(190, 15, 112, 20);
     colourSelectorWidget->setBounds(15, 50, 180, 20);
     siteEditor->setBounds(15, 80, 150, 20);
-    pulsePowerEditor->setBounds(15, 110, 150, 20);
+    pulsePowersEditor->setBounds(15, 110, 172, 20);
     numRepeatsEditor->setBounds(15, 140, 150, 20);
     
     if (pulseTrainInterface.get() != nullptr)
@@ -912,7 +1027,7 @@ void OptoConditionInterface::enable()
     if (loadJsonButton != nullptr)
         loadJsonButton->setEnabled(!hw);
     siteEditor->parameterEnabled(hw);
-    pulsePowerEditor->parameterEnabled(hw);
+    pulsePowersEditor->parameterEnabled(hw);
     numRepeatsEditor->parameterEnabled(true);
     
     if (hw)
@@ -939,7 +1054,7 @@ void OptoConditionInterface::disable()
     if (loadJsonButton != nullptr)
         loadJsonButton->setEnabled(false);
     siteEditor->parameterEnabled(false);
-    pulsePowerEditor->parameterEnabled(false);
+    pulsePowersEditor->parameterEnabled(false);
     numRepeatsEditor->parameterEnabled(false);
     
     colourSelectorWidget->disable();
@@ -1209,6 +1324,9 @@ String ConditionsTableModel::getStructureSignature() const
         for (auto* cond : seq->conditions)
         {
             s << cond->num_repeats.getIntValue() << ",";
+            for (int pi = 0; pi < cond->getNumPulsePowers(); ++pi)
+                s << cond->getPulsePower(pi) << ",";
+            s << "/";
             for (auto wl : cond->availableWavelengths)
                 s << wl << ",";
             s << ";";
@@ -1221,7 +1339,8 @@ String ConditionsTableModel::getStructureSignature() const
         s << (seq->randomize.getBoolValue() ? "1" : "0") << ";";
         s << seq->min_iti.getFloatValue() << "," << seq->max_iti.getFloatValue() << "!";
         for (const auto& b : seq->getTrialBlockOrder())
-            s << std::get<0>(b) << ',' << std::get<1>(b) << ',' << std::get<2>(b) << ',' << std::get<3>(b) << ';';
+            s << std::get<0>(b) << ',' << std::get<1>(b) << ',' << std::get<2>(b) << ','
+              << std::get<3>(b) << ',' << std::get<4>(b) << ';';
         s << "||";
     }
     return s;
@@ -1236,24 +1355,26 @@ void ConditionsTableModel::rebuildRowOrder()
         Sequence* seq = protocol->sequences[s];
         if (seq->baseline_interval.getFloatValue() > 0)
         {
-            rowOrder.add(std::make_tuple(s + 1, 0, 0, 0, 0));
+            rowOrder.add(std::make_tuple(s + 1, 0, 0, 0, 0, 0));
         }
         for (const auto& b : seq->getTrialBlockOrder())
         {
-            rowOrder.add(std::make_tuple(s + 1, std::get<0>(b) + 1, std::get<1>(b) + 1, std::get<2>(b), std::get<3>(b)));
+            rowOrder.add(std::make_tuple(s + 1, std::get<0>(b) + 1, std::get<1>(b) + 1,
+                                         std::get<2>(b), std::get<3>(b), std::get<4>(b)));
         }
     }
 }
 
-void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& wavelengthIdx, int& siteIdx) const
+void ConditionsTableModel::rowToIndices(int row, int& seqIdx, int& condIdx, int& repeatIdx, int& powerIdx, int& wavelengthIdx, int& siteIdx) const
 {
-    if (row < 0 || row >= rowOrder.size()) { seqIdx = condIdx = repeatIdx = wavelengthIdx = siteIdx = 0; return; }
+    if (row < 0 || row >= rowOrder.size()) { seqIdx = condIdx = repeatIdx = powerIdx = wavelengthIdx = siteIdx = 0; return; }
     const auto& t = rowOrder[row];
     seqIdx = std::get<0>(t);
     condIdx = std::get<1>(t);
     repeatIdx = std::get<2>(t);
-    wavelengthIdx = std::get<3>(t);
-    siteIdx = std::get<4>(t);
+    powerIdx = std::get<3>(t);
+    wavelengthIdx = std::get<4>(t);
+    siteIdx = std::get<5>(t);
 }
 
 int ConditionsTableModel::getRuntimeBlockIndexForRow(int row) const
@@ -1301,8 +1422,8 @@ Stimulus* ConditionsTableModel::getStimulusForRow(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size())
         return nullptr;
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
     if (condIdx == 0 || seqIdx < 1 || seqIdx > protocol->sequences.size())
         return nullptr;
     Sequence* seq = protocol->sequences[seqIdx - 1];
@@ -1365,6 +1486,15 @@ String ConditionsTableModel::getStimulusParamsString(int row) const
 static String getCsvFloatString(float value)
 {
     return String((int)(value * 100.0f) / 100.0f, 2);
+}
+static String getMinimalFloatString(float value)
+{
+    String text(value, 6);
+    while (text.containsChar('.') && text.endsWithChar('0'))
+        text = text.dropLastCharacters(1);
+    if (text.endsWithChar('.'))
+        text = text.dropLastCharacters(1);
+    return text == "-0" ? "0" : text;
 }
 
 String ConditionsTableModel::getPulseWidthString(int row) const
@@ -1478,25 +1608,24 @@ String ConditionsTableModel::getSitesString(int seqIdx, int condIdx, int siteIdx
     return String((int)arr[siteIdx] + 1);
 }
 
-String ConditionsTableModel::getLightPowerString(int seqIdx, int condIdx) const
+String ConditionsTableModel::getLightPowerString(int seqIdx, int condIdx, int powerIdx) const
 {
     if (condIdx == 0) return "";
     if (!protocol || seqIdx < 1 || seqIdx > protocol->sequences.size()) return {};
     Sequence* seq = protocol->sequences[seqIdx - 1];
     if (condIdx < 1 || condIdx > seq->conditions.size()) return {};
-    return seq->conditions[condIdx - 1]->pulse_power.getValueAsString();
+    return getMinimalFloatString(seq->conditions[condIdx - 1]->getPulsePower(powerIdx));
 }
 
 String ConditionsTableModel::getTrialString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
     if (condIdx == 0) return "";
     int trial = 0;
     for (int r = 0; r <= row; ++r)
     {
-        if (std::get<0>(rowOrder[r]) != seqIdx) continue;
         if (std::get<1>(rowOrder[r]) != 0) ++trial;
     }
     return String(trial);
@@ -1505,8 +1634,8 @@ String ConditionsTableModel::getTrialString(int row) const
 String ConditionsTableModel::getITIString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
     if (condIdx == 0 || seqIdx < 1 || seqIdx > protocol->sequences.size())
         return {};
     const int blockIndex = getRuntimeBlockIndexForRow(row);
@@ -1521,8 +1650,8 @@ static float formatTimeSec(float t) { return (int)(t * 100.0f + 0.5f) / 100.0f; 
 String ConditionsTableModel::getStartTimeString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
     float timeBeforeSeq = 0.f;
     for (int s = 1; s < seqIdx; ++s)
@@ -1530,8 +1659,8 @@ String ConditionsTableModel::getStartTimeString(int row) const
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
-        int s, c, p, w, st;
-        rowToIndices(r, s, c, p, w, st);
+        int s, c, rep, p, w, st;
+        rowToIndices(r, s, c, rep, p, w, st);
         if (s == seqIdx) ++pos;
     }
     const float baseline = seq->baseline_interval.getFloatValue();
@@ -1539,8 +1668,8 @@ String ConditionsTableModel::getStartTimeString(int row) const
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
-        int s, c, p, w, st;
-        rowToIndices(r, s, c, p, w, st);
+        int s, c, rep, p, w, st;
+        rowToIndices(r, s, c, rep, p, w, st);
         if (s != seqIdx) continue;
         const float blockDur = computeRowBlockDuration(r);
         if (idx == pos)
@@ -1554,8 +1683,8 @@ String ConditionsTableModel::getStartTimeString(int row) const
 String ConditionsTableModel::getEndTimeString(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return {};
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
     float timeBeforeSeq = 0.f;
     for (int s = 1; s < seqIdx; ++s)
@@ -1563,8 +1692,8 @@ String ConditionsTableModel::getEndTimeString(int row) const
     int pos = 0;
     for (int r = 0; r < row; ++r)
     {
-        int s, c, p, w, st;
-        rowToIndices(r, s, c, p, w, st);
+        int s, c, rep, p, w, st;
+        rowToIndices(r, s, c, rep, p, w, st);
         if (s == seqIdx) ++pos;
     }
     const float baseline = seq->baseline_interval.getFloatValue();
@@ -1572,8 +1701,8 @@ String ConditionsTableModel::getEndTimeString(int row) const
     int idx = 0;
     for (int r = 0; r < rowOrder.size(); ++r)
     {
-        int s, c, p, w, st;
-        rowToIndices(r, s, c, p, w, st);
+        int s, c, rep, p, w, st;
+        rowToIndices(r, s, c, rep, p, w, st);
         if (s != seqIdx) continue;
         const float blockDur = computeRowBlockDuration(r);
         if (idx == pos)
@@ -1601,8 +1730,8 @@ int ConditionsTableModel::getRowIndexForSequenceAndTrial(int seqIdx, int trialNu
     for (int r = 0; r < rowOrder.size(); ++r)
     {
         if (std::get<0>(rowOrder[r]) != seqIdx) continue;
-        int s, c, p, w, st;
-        rowToIndices(r, s, c, p, w, st);
+        int s, c, rep, p, w, st;
+        rowToIndices(r, s, c, rep, p, w, st);
         if (c == 0) continue;
         int n = (int)seq->conditions[c - 1]->stimuli.size();
         count += n;
@@ -1632,8 +1761,8 @@ int ConditionsTableModel::getNumRows()
 float ConditionsTableModel::computeRowBlockDuration(int row) const
 {
     if (!protocol || row < 0 || row >= rowOrder.size()) return 0.f;
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-    rowToIndices(row, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+    rowToIndices(row, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
     Sequence* seq = protocol->sequences[seqIdx - 1];
     const float baseline = seq->baseline_interval.getFloatValue();
     if (condIdx == 0)
@@ -1670,8 +1799,8 @@ void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int wi
 {
     if (isRunning && rowNumber == activeRow)
     {
-        int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-        rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+        int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+        rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
         Colour c;
         if (condIdx == 0)
             c = Colours::orange;
@@ -1697,8 +1826,8 @@ void ConditionsTableModel::paintRowBackground(Graphics& g, int rowNumber, int wi
 
 String ConditionsTableModel::getCellText(int rowNumber, int columnId) const
 {
-    int seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx;
-    rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, wavelengthIdx, siteIdx);
+    int seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx;
+    rowToIndices(rowNumber, seqIdx, condIdx, repeatIdx, powerIdx, wavelengthIdx, siteIdx);
     switch (columnId)
     {
         case ColRow: return getTrialString(rowNumber);
@@ -1708,7 +1837,7 @@ String ConditionsTableModel::getCellText(int rowNumber, int columnId) const
         case ColProbe: return getProbeName(seqIdx, condIdx);
         case ColWavelength: return getWavelengthString(seqIdx, condIdx, wavelengthIdx);
         case ColSites: return getSitesString(seqIdx, condIdx, siteIdx);
-        case ColLightPower: return getLightPowerString(seqIdx, condIdx);
+        case ColLightPower: return getLightPowerString(seqIdx, condIdx, powerIdx);
         case ColITI: return (condIdx == 0) ? "" : getITIString(rowNumber);
         case ColStartTime: return getStartTimeString(rowNumber);
         case ColEndTime: return getEndTimeString(rowNumber);
@@ -1839,17 +1968,17 @@ ConditionsTable::ConditionsTable()
     tableLookAndFeel = std::make_unique<ConditionsTableLookAndFeel>();
     const int columnFlags = TableHeaderComponent::notSortable;
     table.setModel(&model);
-    table.getHeader().addColumn("Trial", ColRow, 44, 36, 80, columnFlags);
-    table.getHeader().addColumn("Sequence", ColSequence, 62, 50, 80, columnFlags);
-    table.getHeader().addColumn("Condition", ColCondition, 88, 70, 120, columnFlags);
-    table.getHeader().addColumn("Parameters", ColStimulusParams, 150, 110, 220, columnFlags);
+    table.getHeader().addColumn("Trial", ColRow, 30, 30, 30, columnFlags);
+    table.getHeader().addColumn("Seq", ColSequence, 45, 45, 45, columnFlags);
+    table.getHeader().addColumn("Condition", ColCondition, 70, 70, 70, columnFlags);
+    table.getHeader().addColumn("Parameters", ColStimulusParams, 120, 100, 220, columnFlags);
     table.getHeader().addColumn("Source", ColProbe, 68, 56, 100, columnFlags);
-    table.getHeader().addColumn("Wavelength", ColWavelength, 90, 70, 120, columnFlags);
+    table.getHeader().addColumn("Wavelength", ColWavelength, 65, 65, 80, columnFlags);
     table.getHeader().addColumn("Site", ColSites, 26, 18, 45, columnFlags);
-    table.getHeader().addColumn("Light Power", ColLightPower, 72, 56, 100, columnFlags);
+    table.getHeader().addColumn("Power", ColLightPower, 56, 56, 56, columnFlags);
     table.getHeader().addColumn("ITI", ColITI, 29, 21, 42, columnFlags);
-    table.getHeader().addColumn("Start", ColStartTime, 62, 50, 100, columnFlags);
-    table.getHeader().addColumn("End", ColEndTime, 62, 50, 100, columnFlags);
+    table.getHeader().addColumn("Start", ColStartTime, 50, 40, 80, columnFlags);
+    table.getHeader().addColumn("End", ColEndTime, 50, 40, 80, columnFlags);
     table.getHeader().addColumn("Repeat", ColRepeat, 48, 40, 80, columnFlags);
     table.setHeaderHeight(22);
     table.setRowHeight(30);
@@ -2221,11 +2350,14 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
                         cnd->refreshForSelectedSource(hardwareConfig.get());
                         ci->onHardwareConfigChanged();
                     }
-                    if (parameter == &cnd->pulse_power)
+                    bool isPulsePowerParameter = false;
+                    for (auto* pulsePowerParameter : cnd->pulse_powers)
+                        if (parameter == pulsePowerParameter)
+                            isPulsePowerParameter = true;
+                    if (isPulsePowerParameter)
                     {
-                        const float pulsePower = cnd->pulse_power.getFloatValue();
                         const int di = jlimit(0, (int) hardwareConfig->devices.size() - 1, cnd->source.getSelectedIndex());
-                        auto logForWavelength = [&](int wavelengthNm) {
+                        auto logForWavelength = [&](int wavelengthNm, float pulsePower) {
                             if (const OptoHardwareLightSource* lsp = hardwareConfig->findLightSource(di, wavelengthNm))
                             {
                                 const OptoHardwareLightSource& cal = *lsp;
@@ -2236,14 +2368,16 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
                         };
                         if (cnd->availableWavelengths.size() > 0)
                         {
-                            for (int wli = 0; wli < cnd->availableWavelengths.size(); ++wli)
-                                logForWavelength(cnd->availableWavelengths[wli]);
+                            for (int pi = 0; pi < cnd->getNumPulsePowers(); ++pi)
+                                for (int wli = 0; wli < cnd->availableWavelengths.size(); ++wli)
+                                    logForWavelength(cnd->availableWavelengths[wli], cnd->getPulsePower(pi));
                         }
                         else
                         {
                             const auto& dev = hardwareConfig->devices[di];
-                            for (int lsi = 0; lsi < dev.lightSources.size(); ++lsi)
-                                logForWavelength(dev.lightSources[lsi].wavelength);
+                            for (int pi = 0; pi < cnd->getNumPulsePowers(); ++pi)
+                                for (int lsi = 0; lsi < dev.lightSources.size(); ++lsi)
+                                    logForWavelength(dev.lightSources[lsi].wavelength, cnd->getPulsePower(pi));
                         }
                     }
                 }
@@ -2255,6 +2389,8 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
         timeline->reset();
     protocol->reset();
     protocol->createTrials();
+    clearExecutedTrials();
+    setTableRunning(false);
     refreshConditionsTable();
     if (timeline != nullptr)
     {
@@ -2275,7 +2411,6 @@ void OptoProtocolInterface::setTimeline(ProtocolTimeline* timeline_)
     refreshConditionsTable();
     timeline->setTotalTime(getTableTotalDuration());
     timeline->setTotalTrials(protocol->getTotalTrials());
-    protocol->addActionListener(timeline);
 }
 
 void OptoProtocolInterface::refreshConditionsTable()
@@ -2687,7 +2822,7 @@ static void appendConditionXml(XmlElement* seqEl, Condition* cond)
     XmlElement* c = seqEl->createNewChildElement("CONDITION");
     c->setAttribute("numRepeats", cond->num_repeats.getIntValue());
     c->setAttribute("sourceIndex", cond->source.getSelectedIndex());
-    c->setAttribute("pulsePower", cond->pulse_power.getFloatValue());
+    c->setAttribute("pulsePowers", cond->getPulsePowersString());
     String wl;
     for (int i = 0; i < cond->availableWavelengths.size(); ++i)
     {
@@ -2750,7 +2885,20 @@ void OptoSequenceInterface::importConditionFromXml(XmlElement* cEl)
     }
     condition->num_repeats.setNextValue(cEl->getIntAttribute("numRepeats", 1), false);
     condition->source.setNextValue(cEl->getIntAttribute("sourceIndex", 0), false);
-    condition->pulse_power.setNextValue((float)cEl->getDoubleAttribute("pulsePower", 10.0), false);
+    {
+        Array<float> powers;
+        String powersText = cEl->getStringAttribute("pulsePowers");
+        if (powersText.isEmpty() && cEl->hasAttribute("pulsePower"))
+            powersText = cEl->getStringAttribute("pulsePower");
+        StringArray powerTokens;
+        powerTokens.addTokens(powersText, ",", "");
+        for (auto& token : powerTokens)
+            if (token.trim().isNotEmpty())
+                powers.add(token.getFloatValue());
+        if (powers.isEmpty())
+            powers.add(10.f);
+        condition->setPulsePowers(powers);
+    }
     {
         const int srcIdx = jlimit(0, jmax(0, sitesPerSource.size() - 1), condition->source.getSelectedIndex());
         condition->sites->setChannelCount(sitesPerSource[srcIdx]);
@@ -3235,6 +3383,19 @@ void OptoProtocolCanvas::writeCurrentStimulusTableForRecording(const String& rea
     iface->writeStimulusTableCsv(activeRecordingDirectory, reasonTag);
 }
 
+int OptoProtocolCanvas::getGlobalTrialNumber(int sequenceIndex, int sequenceTrialNumber) const
+{
+    if (currentProtocol == nullptr || sequenceTrialNumber <= 0)
+        return 0;
+
+    int globalTrialNumber = sequenceTrialNumber;
+    const int clampedSequenceIndex = jlimit(0, currentProtocol->sequences.size(), sequenceIndex);
+    for (int i = 0; i < clampedSequenceIndex; ++i)
+        globalTrialNumber += currentProtocol->sequences[i]->getTotalTrials();
+
+    return globalTrialNumber;
+}
+
 void OptoProtocolCanvas::actionListenerCallback(const String& message)
 {
     OptoProtocolInterface* iface = getCurrentInterface();
@@ -3253,6 +3414,8 @@ void OptoProtocolCanvas::actionListenerCallback(const String& message)
     {
         int seqIdx = currentProtocol->getCurrentSequenceIndex();
         int trialNum = message.getIntValue();
+        if (protocolTimeline != nullptr)
+            protocolTimeline->setCurrentTrial(getGlobalTrialNumber(seqIdx, trialNum));
         int trialStarted = trialNum - 1; // message is post-increment
         if (seqIdx >= 0 && seqIdx < currentProtocol->sequences.size() && trialStarted >= 0)
         {
