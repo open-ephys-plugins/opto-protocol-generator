@@ -25,6 +25,10 @@
 
 #include "OptoProtocolEditor.h"
 
+namespace
+{
+    constexpr uint16_t maxNodeIdToScan = 4096;
+}
 
 OptoProtocolGenerator::OptoProtocolGenerator() 
     : GenericProcessor("Opto Protocol Gen")
@@ -48,22 +52,81 @@ AudioProcessorEditor* OptoProtocolGenerator::createEditor()
 
 void OptoProtocolGenerator::saveCustomParametersToXml(XmlElement* parentElement)
 {
-
+    parentElement->setAttribute("nidaqOutputProcessorId", selectedNidaqOutputProcessorId);
 }
 
 
 void OptoProtocolGenerator::loadCustomParametersFromXml(XmlElement* parentElement)
 {
-
+    selectedNidaqOutputProcessorId = parentElement->getIntAttribute("nidaqOutputProcessorId", -1);
 }
 
 void OptoProtocolGenerator::sendConfigToNidaqOutput(const String& json)
 {
-    GenericProcessor* nidaqOut = CoreServices::getProcessorByName("NIDAQ Output");
+    GenericProcessor* nidaqOut = getSelectedNidaqOutputProcessor();
+
     if (nidaqOut == nullptr)
-        nidaqOut = CoreServices::getProcessorByName("NIDAQOutput");
+    {
+        const Array<int> ids = getAvailableNidaqOutputProcessorIds();
+        if (! ids.isEmpty())
+        {
+            selectedNidaqOutputProcessorId = ids[0];
+            nidaqOut = getSelectedNidaqOutputProcessor();
+        }
+    }
+
     if (nidaqOut != nullptr)
         sendConfigMessage(nidaqOut, json);
     else
         LOGE("Could not find NIDAQ Output processor to send trial config.");
+}
+
+Array<int> OptoProtocolGenerator::getAvailableNidaqOutputProcessorIds() const
+{
+    Array<int> ids;
+
+    for (uint16_t nodeId = 1; nodeId <= maxNodeIdToScan; ++nodeId)
+    {
+        GenericProcessor* processor = CoreServices::getProcessorById(nodeId);
+        if (isNidaqOutputProcessor(processor))
+            ids.add(nodeId);
+    }
+
+    return ids;
+}
+
+String OptoProtocolGenerator::getNidaqOutputProcessorLabel(int nodeId) const
+{
+    GenericProcessor* processor = CoreServices::getProcessorById((uint16_t) nodeId);
+    if (processor == nullptr)
+        return {};
+
+    return processor->getName() + " (" + String(nodeId) + ")";
+}
+
+void OptoProtocolGenerator::setSelectedNidaqOutputProcessorId(int nodeId)
+{
+    selectedNidaqOutputProcessorId = nodeId;
+}
+
+int OptoProtocolGenerator::getSelectedNidaqOutputProcessorId() const
+{
+    return selectedNidaqOutputProcessorId;
+}
+
+GenericProcessor* OptoProtocolGenerator::getSelectedNidaqOutputProcessor() const
+{
+    if (selectedNidaqOutputProcessorId < 0 || selectedNidaqOutputProcessorId > maxNodeIdToScan)
+        return nullptr;
+
+    GenericProcessor* processor = CoreServices::getProcessorById((uint16_t) selectedNidaqOutputProcessorId);
+    return isNidaqOutputProcessor(processor) ? processor : nullptr;
+}
+
+bool OptoProtocolGenerator::isNidaqOutputProcessor(GenericProcessor* processor)
+{
+    if (processor == nullptr)
+        return false;
+
+    return processor->getName() == "NIDAQ Output";
 }

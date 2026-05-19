@@ -21,53 +21,42 @@
 
 */
 
-//This prevents include loops. We recommend changing the macro to a name suitable for your plugin
 #ifndef OPTOPROTOCOLGENERATORPLUGIN_H_DEFINED
 #define OPTOPROTOCOLGENERATORPLUGIN_H_DEFINED
 
 #include <ProcessorHeaders.h>
 
-
-/** 
-	A plugin for defining a custom protocol for optogenetic stimulation.
-
-	The plugin doesn't do any processing, it just creates a user interface
-	for building a protocol consisting of a set of conditions.
-
-	This is a meant to be a convenient way to define and share protocols for 
-	experiments.
-*/
-
 class OptoProtocolGenerator : public GenericProcessor
 {
 public:
-	/** The class constructor, used to initialize any members.*/
 	OptoProtocolGenerator();
 
-	/** The class destructor, used to deallocate memory*/
 	~OptoProtocolGenerator();
 
-	/** If the processor has a custom editor, this method must be defined to instantiate it. */
 	AudioProcessorEditor* createEditor() override;
 
-	/** Saving custom settings to XML. This method is not needed to save the state of
-		Parameter objects */
 	void saveCustomParametersToXml(XmlElement* parentElement) override;
 
-	/** Load custom settings from XML. This method is not needed to load the state of
-		Parameter objects*/
 	void loadCustomParametersFromXml(XmlElement* parentElement) override;
-    
-    
-    /** Process function (not used)  */
+
     void process (AudioBuffer<float>& continuousBuffer) override {}
 
-    /** Sends config JSON to the NIDAQ Output processor if present in the signal chain. */
     void sendConfigToNidaqOutput(const String& json);
+
+    Array<int> getAvailableNidaqOutputProcessorIds() const;
+
+    String getNidaqOutputProcessorLabel(int nodeId) const;
+
+    void setSelectedNidaqOutputProcessorId(int nodeId);
+    int getSelectedNidaqOutputProcessorId() const;
 
 private:
 
-	/** Generates an assertion if this class leaks */
+    GenericProcessor* getSelectedNidaqOutputProcessor() const;
+    static bool isNidaqOutputProcessor(GenericProcessor* processor);
+
+    int selectedNidaqOutputProcessorId = -1;
+
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolGenerator);
 
 };

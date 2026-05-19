@@ -21,7 +21,6 @@
 
 */
 
-//This prevents include loops. We recommend changing the macro to a name suitable for your plugin
 #ifndef OPTOPROTOCOLEDITOR_H_DEFINED
 #define OPTOPROTOCOLEDITOR_H_DEFINED
 
@@ -29,38 +28,43 @@
 
 class OptoProtocolCanvas;
 
-/** 
-	The editor for the OptoProtocolGenerator
-
-	Includes buttons for opening the canvas in a tab or window
-*/
-
-class OptoProtocolEditor : public VisualizerEditor
+class OptoProtocolEditor : public VisualizerEditor,
+                            public ComboBox::Listener,
+                            private Timer
 {
 public:
 
-	/** Constructor */
 	OptoProtocolEditor(GenericProcessor* parentNode);
 
-	/** Destructor */
-	~OptoProtocolEditor() { }
+	~OptoProtocolEditor() override;
 
-	/** Creates the canvas */
 	Visualizer* createNewCanvas();
 
-	/** Called when recording starts */
+	void startAcquisition() override;
+
+	void stopAcquisition() override;
+
 	void startRecording() override;
 
-	/** Called when recording starts */
 	void stopRecording() override;
+
+	void refreshOutputProcessorSelector();
 
 private:
 
-	OptoProtocolCanvas* thisCanvas = nullptr;
+	void comboBoxChanged(ComboBox* comboBox) override;
 
-	/** Generates an assertion if this class leaks */
+	void timerCallback() override;
+
+	void updateOutputProcessorSelectorEnabled(bool hasOutputs);
+
+	bool outputProcessorSelectorHasOutputs = false;
+
+	std::unique_ptr<Label> outputProcessorLabel;
+	std::unique_ptr<ComboBox> outputProcessorSelector;
+	String outputProcessorSelectorSignature = "uninitialized";
+
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolEditor);
 };
-
 
 #endif // OPTOPROTOCOLEDITOR_H_DEFINED

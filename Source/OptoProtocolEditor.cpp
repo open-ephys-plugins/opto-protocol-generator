@@ -31,32 +31,123 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 OptoProtocolEditor::OptoProtocolEditor(GenericProcessor* p)
     : VisualizerEditor(p, "Opto Protocol", 240)
 {
+    outputProcessorLabel = std::make_unique<Label>("outputProcessorLabel", "Output Node");
+    outputProcessorLabel->setBounds(20, 40, 200, 20);
+    addAndMakeVisible(outputProcessorLabel.get());
 
-    //addSelectedChannelsParameterEditor("Channels", 20, 105);
+    outputProcessorSelector = std::make_unique<ComboBox>("outputProcessorSelector");
+    outputProcessorSelector->setBounds(20, 60, 200, 20);
+    outputProcessorSelector->addListener(this);
+    addAndMakeVisible(outputProcessorSelector.get());
 
+    refreshOutputProcessorSelector();
+    startTimer(500);
+}
+
+OptoProtocolEditor::~OptoProtocolEditor()
+{
+    stopTimer();
 }
 
 Visualizer* OptoProtocolEditor::createNewCanvas()
 {
-    thisCanvas = new OptoProtocolCanvas((OptoProtocolGenerator*) getProcessor());
-	return thisCanvas;
+    return new OptoProtocolCanvas((OptoProtocolGenerator*) getProcessor());
 }
 
+void OptoProtocolEditor::comboBoxChanged(ComboBox* comboBox)
+{
+    if (comboBox != outputProcessorSelector.get())
+        return;
 
+    const int nodeId = comboBox->getSelectedId() - 1;
+    if (nodeId >= 0)
+        ((OptoProtocolGenerator*) getProcessor())->setSelectedNidaqOutputProcessorId(nodeId);
+}
+
+void OptoProtocolEditor::timerCallback()
+{
+    refreshOutputProcessorSelector();
+}
+
+void OptoProtocolEditor::refreshOutputProcessorSelector()
+{
+    auto* optoProcessor = (OptoProtocolGenerator*) getProcessor();
+    const Array<int> ids = optoProcessor->getAvailableNidaqOutputProcessorIds();
+    int selectedNodeId = optoProcessor->getSelectedNidaqOutputProcessorId();
+
+    if (ids.isEmpty())
+    {
+        selectedNodeId = -1;
+    }
+    else if (! ids.contains(selectedNodeId))
+    {
+        selectedNodeId = ids[0];
+    }
+
+    if (selectedNodeId != optoProcessor->getSelectedNidaqOutputProcessorId())
+        optoProcessor->setSelectedNidaqOutputProcessorId(selectedNodeId);
+
+    String signature;
+
+    for (int nodeId : ids)
+        signature += String(nodeId) + ":" + optoProcessor->getNidaqOutputProcessorLabel(nodeId) + "|";
+    signature += "selected=" + String(selectedNodeId);
+
+    if (signature == outputProcessorSelectorSignature)
+    {
+        updateOutputProcessorSelectorEnabled(! ids.isEmpty());
+        return;
+    }
+
+    outputProcessorSelectorSignature = signature;
+    outputProcessorSelector->clear(dontSendNotification);
+
+    if (ids.isEmpty())
+    {
+        outputProcessorSelector->addItem("No NIDAQ Output found", 1);
+        outputProcessorSelector->setSelectedId(1, dontSendNotification);
+        updateOutputProcessorSelectorEnabled(false);
+        return;
+    }
+
+    for (int nodeId : ids)
+        outputProcessorSelector->addItem(optoProcessor->getNidaqOutputProcessorLabel(nodeId), nodeId + 1);
+
+    outputProcessorSelector->setSelectedId(selectedNodeId + 1, dontSendNotification);
+    updateOutputProcessorSelectorEnabled(true);
+}
+
+void OptoProtocolEditor::startAcquisition()
+{
+    outputProcessorSelector->setEnabled(false);
+}
+
+void OptoProtocolEditor::stopAcquisition()
+{
+    updateOutputProcessorSelectorEnabled(outputProcessorSelectorHasOutputs);
+}
+
+void OptoProtocolEditor::updateOutputProcessorSelectorEnabled(bool hasOutputs)
+{
+    outputProcessorSelectorHasOutputs = hasOutputs;
+    const bool acquisitionActive = acquisitionIsActive || CoreServices::getAcquisitionStatus();
+    outputProcessorSelector->setEnabled(hasOutputs && ! acquisitionActive);
+}
 
 void OptoProtocolEditor::startRecording()
 {
+    checkForCanvas();
 
-    File parentDirectory = CoreServices::getRecordingParentDirectory().getChildFile(CoreServices::getRecordingDirectoryName());
-
-    File recordingDirectory = parentDirectory.getChildFile(getProcessor()->getName() + " " + String(getProcessor()->getNodeId()));
-
-    thisCanvas->startRecording(recordingDirectory);
+    if (auto* optoCanvas = dynamic_cast<OptoProtocolCanvas*>(canvas.get()))
+    {
+        File parentDirectory = CoreServices::getRecordingParentDirectory().getChildFile(CoreServices::getRecordingDirectoryName());
+        File recordingDirectory = parentDirectory.getChildFile(getProcessor()->getName() + " " + String(getProcessor()->getNodeId()));
+        optoCanvas->startRecording(recordingDirectory);
+    }
 }
 
 void OptoProtocolEditor::stopRecording()
 {
-
-    thisCanvas->stopRecording();
-
+    if (auto* optoCanvas = dynamic_cast<OptoProtocolCanvas*>(canvas.get()))
+        optoCanvas->stopRecording();
 }
