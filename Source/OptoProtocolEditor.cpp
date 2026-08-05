@@ -61,7 +61,7 @@ void OptoProtocolEditor::comboBoxChanged(ComboBox* comboBox)
 
     const int nodeId = comboBox->getSelectedId() - 1;
     if (nodeId >= 0)
-        ((OptoProtocolGenerator*) getProcessor())->setSelectedNidaqOutputProcessorId(nodeId);
+        ((OptoProtocolGenerator*) getProcessor())->setSelectedOutputProcessorId(nodeId);
 }
 
 void OptoProtocolEditor::timerCallback()
@@ -72,8 +72,8 @@ void OptoProtocolEditor::timerCallback()
 void OptoProtocolEditor::refreshOutputProcessorSelector()
 {
     auto* optoProcessor = (OptoProtocolGenerator*) getProcessor();
-    const Array<int> ids = optoProcessor->getAvailableNidaqOutputProcessorIds();
-    int selectedNodeId = optoProcessor->getSelectedNidaqOutputProcessorId();
+    const Array<int> ids = optoProcessor->getAvailableOutputProcessorIds();
+    int selectedNodeId = optoProcessor->getSelectedOutputProcessorId();
 
     if (ids.isEmpty())
     {
@@ -84,13 +84,13 @@ void OptoProtocolEditor::refreshOutputProcessorSelector()
         selectedNodeId = ids[0];
     }
 
-    if (selectedNodeId != optoProcessor->getSelectedNidaqOutputProcessorId())
-        optoProcessor->setSelectedNidaqOutputProcessorId(selectedNodeId);
+    if (selectedNodeId != optoProcessor->getSelectedOutputProcessorId())
+        optoProcessor->setSelectedOutputProcessorId(selectedNodeId);
 
     String signature;
 
     for (int nodeId : ids)
-        signature += String(nodeId) + ":" + optoProcessor->getNidaqOutputProcessorLabel(nodeId) + "|";
+        signature += String(nodeId) + ":" + optoProcessor->getOutputProcessorLabel(nodeId) + "|";
     signature += "selected=" + String(selectedNodeId);
 
     if (signature == outputProcessorSelectorSignature)
@@ -104,14 +104,14 @@ void OptoProtocolEditor::refreshOutputProcessorSelector()
 
     if (ids.isEmpty())
     {
-        outputProcessorSelector->addItem("No NIDAQ Output found", 1);
+        outputProcessorSelector->addItem("No output processor found", 1);
         outputProcessorSelector->setSelectedId(1, dontSendNotification);
         updateOutputProcessorSelectorEnabled(false);
         return;
     }
 
     for (int nodeId : ids)
-        outputProcessorSelector->addItem(optoProcessor->getNidaqOutputProcessorLabel(nodeId), nodeId + 1);
+        outputProcessorSelector->addItem(optoProcessor->getOutputProcessorLabel(nodeId), nodeId + 1);
 
     outputProcessorSelector->setSelectedId(selectedNodeId + 1, dontSendNotification);
     updateOutputProcessorSelectorEnabled(true);

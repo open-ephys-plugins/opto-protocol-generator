@@ -52,50 +52,52 @@ AudioProcessorEditor* OptoProtocolGenerator::createEditor()
 
 void OptoProtocolGenerator::saveCustomParametersToXml(XmlElement* parentElement)
 {
-    parentElement->setAttribute("nidaqOutputProcessorId", selectedNidaqOutputProcessorId);
+    parentElement->setAttribute("outputProcessorId", selectedOutputProcessorId);
 }
 
 
 void OptoProtocolGenerator::loadCustomParametersFromXml(XmlElement* parentElement)
 {
-    selectedNidaqOutputProcessorId = parentElement->getIntAttribute("nidaqOutputProcessorId", -1);
+    selectedOutputProcessorId = parentElement->getIntAttribute(
+        "outputProcessorId",
+        parentElement->getIntAttribute("nidaqOutputProcessorId", -1));
 }
 
-void OptoProtocolGenerator::sendConfigToNidaqOutput(const String& json)
+void OptoProtocolGenerator::sendConfigToOutput(const String& json)
 {
-    GenericProcessor* nidaqOut = getSelectedNidaqOutputProcessor();
+    GenericProcessor* output = getSelectedOutputProcessor();
 
-    if (nidaqOut == nullptr)
+    if (output == nullptr)
     {
-        const Array<int> ids = getAvailableNidaqOutputProcessorIds();
+        const Array<int> ids = getAvailableOutputProcessorIds();
         if (! ids.isEmpty())
         {
-            selectedNidaqOutputProcessorId = ids[0];
-            nidaqOut = getSelectedNidaqOutputProcessor();
+            selectedOutputProcessorId = ids[0];
+            output = getSelectedOutputProcessor();
         }
     }
 
-    if (nidaqOut != nullptr)
-        sendConfigMessage(nidaqOut, json);
+    if (output != nullptr)
+        sendConfigMessage(output, json);
     else
-        LOGE("Could not find NIDAQ Output processor to send trial config.");
+        LOGE("Could not find NIDAQ Output or Wave Player processor to send trial config.");
 }
 
-Array<int> OptoProtocolGenerator::getAvailableNidaqOutputProcessorIds() const
+Array<int> OptoProtocolGenerator::getAvailableOutputProcessorIds() const
 {
     Array<int> ids;
 
     for (uint16_t nodeId = 1; nodeId <= maxNodeIdToScan; ++nodeId)
     {
         GenericProcessor* processor = CoreServices::getProcessorById(nodeId);
-        if (isNidaqOutputProcessor(processor))
+        if (isOutputProcessor(processor))
             ids.add(nodeId);
     }
 
     return ids;
 }
 
-String OptoProtocolGenerator::getNidaqOutputProcessorLabel(int nodeId) const
+String OptoProtocolGenerator::getOutputProcessorLabel(int nodeId) const
 {
     GenericProcessor* processor = CoreServices::getProcessorById((uint16_t) nodeId);
     if (processor == nullptr)
@@ -104,29 +106,30 @@ String OptoProtocolGenerator::getNidaqOutputProcessorLabel(int nodeId) const
     return processor->getName() + " (" + String(nodeId) + ")";
 }
 
-void OptoProtocolGenerator::setSelectedNidaqOutputProcessorId(int nodeId)
+void OptoProtocolGenerator::setSelectedOutputProcessorId(int nodeId)
 {
-    selectedNidaqOutputProcessorId = nodeId;
+    selectedOutputProcessorId = nodeId;
 }
 
-int OptoProtocolGenerator::getSelectedNidaqOutputProcessorId() const
+int OptoProtocolGenerator::getSelectedOutputProcessorId() const
 {
-    return selectedNidaqOutputProcessorId;
+    return selectedOutputProcessorId;
 }
 
-GenericProcessor* OptoProtocolGenerator::getSelectedNidaqOutputProcessor() const
+GenericProcessor* OptoProtocolGenerator::getSelectedOutputProcessor() const
 {
-    if (selectedNidaqOutputProcessorId < 0 || selectedNidaqOutputProcessorId > maxNodeIdToScan)
+    if (selectedOutputProcessorId < 0 || selectedOutputProcessorId > maxNodeIdToScan)
         return nullptr;
 
-    GenericProcessor* processor = CoreServices::getProcessorById((uint16_t) selectedNidaqOutputProcessorId);
-    return isNidaqOutputProcessor(processor) ? processor : nullptr;
+    GenericProcessor* processor = CoreServices::getProcessorById((uint16_t) selectedOutputProcessorId);
+    return isOutputProcessor(processor) ? processor : nullptr;
 }
 
-bool OptoProtocolGenerator::isNidaqOutputProcessor(GenericProcessor* processor)
+bool OptoProtocolGenerator::isOutputProcessor(GenericProcessor* processor)
 {
     if (processor == nullptr)
         return false;
 
-    return processor->getName() == "NIDAQ Output";
+    const String name = processor->getName();
+    return name == "NIDAQ Output" || name == "Wave Player";
 }

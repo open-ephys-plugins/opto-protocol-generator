@@ -41,21 +41,22 @@ public:
 
     void process (AudioBuffer<float>& continuousBuffer) override {}
 
-    void sendConfigToNidaqOutput(const String& json);
+    /** Sends trial waveform JSON to the selected NIDAQ Output or Wave Player */
+    void sendConfigToOutput(const String& json);
 
-    Array<int> getAvailableNidaqOutputProcessorIds() const;
+    Array<int> getAvailableOutputProcessorIds() const;
 
-    String getNidaqOutputProcessorLabel(int nodeId) const;
+    String getOutputProcessorLabel(int nodeId) const;
 
-    void setSelectedNidaqOutputProcessorId(int nodeId);
-    int getSelectedNidaqOutputProcessorId() const;
+    void setSelectedOutputProcessorId(int nodeId);
+    int getSelectedOutputProcessorId() const;
 
 private:
 
-    GenericProcessor* getSelectedNidaqOutputProcessor() const;
-    static bool isNidaqOutputProcessor(GenericProcessor* processor);
+    GenericProcessor* getSelectedOutputProcessor() const;
+    static bool isOutputProcessor(GenericProcessor* processor);
 
-    int selectedNidaqOutputProcessorId = -1;
+    int selectedOutputProcessorId = -1;
 
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OptoProtocolGenerator);
 

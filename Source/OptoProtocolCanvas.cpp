@@ -3424,7 +3424,7 @@ void OptoProtocolCanvas::actionListenerCallback(const String& message)
             {
                 const OptoHardwareConfig* hw = iface != nullptr ? iface->getHardwareConfig() : nullptr;
                 String json = trialToNidaqJson(seq, trialStarted, hw);
-                processor->sendConfigToNidaqOutput(json);
+                processor->sendConfigToOutput(json);
             }
         }
         if (iface != nullptr)
