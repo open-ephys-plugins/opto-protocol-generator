@@ -655,6 +655,7 @@ private:
     void updateExportTableButtonState();
     void updateExportStatusLabel();
     void clearAllSequences();
+    void scheduleDeferredLayout();
     
     OwnedArray<OptoSequenceInterface> sequenceInterfaces;
     
@@ -679,6 +680,24 @@ private:
     std::unique_ptr<Protocol> protocol;
     
     Viewport* viewport = nullptr;
+
+    bool isLoadingProtocol = false;
+
+    class DeferredLayoutTimer : public Timer
+    {
+    public:
+        explicit DeferredLayoutTimer(OptoProtocolInterface& o) : owner(o) {}
+        void timerCallback() override
+        {
+            stopTimer();
+            owner.updateBounds(0);
+            owner.resized();
+        }
+    private:
+        OptoProtocolInterface& owner;
+    };
+
+    DeferredLayoutTimer deferredLayoutTimer;
 
 };
 

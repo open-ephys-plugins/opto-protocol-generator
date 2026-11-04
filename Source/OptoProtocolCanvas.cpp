@@ -2131,7 +2131,7 @@ const int kConditionsTableBottomMargin = 10;
 const int kConditionsTableMinimumHeight = 120;
 
 OptoProtocolInterface::OptoProtocolInterface(const String& name, Viewport* viewport_)
-    : ParameterOwner(ParameterOwner::OTHER), viewport(viewport_)
+    : ParameterOwner(ParameterOwner::OTHER), viewport(viewport_), deferredLayoutTimer(*this)
 {
 
     protocol = std::make_unique<Protocol>(name, this);
@@ -2326,6 +2326,11 @@ void OptoProtocolInterface::removeSequenceInterface(OptoSequenceInterface* seque
         si->enable();
 }
 
+void OptoProtocolInterface::scheduleDeferredLayout()
+{
+    deferredLayoutTimer.startTimer(0);
+}
+
 void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
 {
     if (parameter != nullptr)
@@ -2337,7 +2342,13 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
         
         LOGD("Parameter name: ", parameter->getName(),
              ", new value: ", parameter->getValueAsString());
+    }
 
+    if (isLoadingProtocol)
+        return;
+
+    if (parameter != nullptr)
+    {
         if (hardwareConfig != nullptr && !hardwareConfig->isEmpty())
         {
             for (auto* si : sequenceInterfaces)
@@ -2397,11 +2408,7 @@ void OptoProtocolInterface::parameterChangeRequest(Parameter* parameter)
         timeline->setTotalTime(getTableTotalDuration());
         timeline->setTotalTrials(protocol->getTotalTrials());
     }
-    Timer::callAfterDelay(0, [this]()
-    {
-        updateBounds(0);
-        resized();
-    });
+    scheduleDeferredLayout();
 }
 
 void OptoProtocolInterface::setTimeline(ProtocolTimeline* timeline_)
@@ -2553,10 +2560,7 @@ void OptoProtocolInterface::applyLoadedHardwareConfig(std::unique_ptr<OptoHardwa
         timeline->setTotalTime(getTableTotalDuration());
         timeline->setTotalTrials(protocol->getTotalTrials());
     }
-    Timer::callAfterDelay(0, [this]() {
-        updateBounds(0);
-        resized();
-    });
+    scheduleDeferredLayout();
 }
 
 void OptoProtocolInterface::launchEditHardwareJsonDialog()
@@ -3000,62 +3004,73 @@ void OptoProtocolInterface::loadProtocolFromXml(XmlElement* protocolElement)
 {
     if (protocolElement == nullptr)
         return;
-    protocol->name = protocolElement->getStringAttribute("name", protocol->name);
-    protocol->description = protocolElement->getStringAttribute("description");
-    hardwareConfigPath = protocolElement->getStringAttribute("hardwareConfigPath");
-    hardwareConfigJsonText.clear();
-    hardwareConfig.reset();
-    if (hardwareConfigPath.isNotEmpty())
+
+    struct LoadGuard
     {
-        const File hf(hardwareConfigPath);
-        if (hf.existsAsFile())
+        bool& flag;
+        explicit LoadGuard(bool& f) : flag(f) { flag = true; }
+        ~LoadGuard() { flag = false; }
+    };
+
+    {
+        const LoadGuard loading(isLoadingProtocol);
+        protocol->name = protocolElement->getStringAttribute("name", protocol->name);
+        protocol->description = protocolElement->getStringAttribute("description");
+        hardwareConfigPath = protocolElement->getStringAttribute("hardwareConfigPath");
+        hardwareConfigJsonText.clear();
+        hardwareConfig.reset();
+        if (hardwareConfigPath.isNotEmpty())
         {
-            hardwareConfigJsonText = hf.loadFileAsString();
-            hardwareConfig = OptoHardwareConfig::parseJson(hardwareConfigJsonText);
+            const File hf(hardwareConfigPath);
+            if (hf.existsAsFile())
+            {
+                hardwareConfigJsonText = hf.loadFileAsString();
+                hardwareConfig = OptoHardwareConfig::parseJson(hardwareConfigJsonText);
+            }
         }
-    }
-    if (editSourcesGlobalButton != nullptr)
-        editSourcesGlobalButton->setEnabled(hardwareConfig != nullptr && addSequenceButton != nullptr && addSequenceButton->isEnabled());
-    clearAllSequences();
-    for (auto* seqEl = protocolElement->getFirstChildElement(); seqEl != nullptr; seqEl = seqEl->getNextElement())
-    {
-        if (seqEl->getTagName() != "SEQUENCE")
-            continue;
-        Sequence* seq = new Sequence(this, protocol.get());
-        protocol->addSequence(seq);
-        const String seqName = seqEl->getStringAttribute("name", "Sequence " + String(protocol->sequences.size()));
-        auto* si = new OptoSequenceInterface(seqName, seq, this, true);
-        sequenceInterfaces.add(si);
-        addAndMakeVisible(si);
-        seq->baseline_interval.setNextValue((float)seqEl->getDoubleAttribute("baseline", 0.0), false);
-        seq->min_iti.setNextValue((float)seqEl->getDoubleAttribute("minIti", 1.0), false);
-        seq->max_iti.setNextValue((float)seqEl->getDoubleAttribute("maxIti", 1.0), false);
-        seq->randomize.setNextValue(seqEl->getBoolAttribute("randomize", true), false);
-        for (auto* cEl = seqEl->getFirstChildElement(); cEl != nullptr; cEl = cEl->getNextElement())
+        if (editSourcesGlobalButton != nullptr)
+            editSourcesGlobalButton->setEnabled(hardwareConfig != nullptr && addSequenceButton != nullptr && addSequenceButton->isEnabled());
+        clearAllSequences();
+        for (auto* seqEl = protocolElement->getFirstChildElement(); seqEl != nullptr; seqEl = seqEl->getNextElement())
         {
-            if (cEl->getTagName() == "CONDITION")
-                si->importConditionFromXml(cEl);
+            if (seqEl->getTagName() != "SEQUENCE")
+                continue;
+            Sequence* seq = new Sequence(this, protocol.get());
+            protocol->addSequence(seq);
+            const String seqName = seqEl->getStringAttribute("name", "Sequence " + String(protocol->sequences.size()));
+            auto* si = new OptoSequenceInterface(seqName, seq, this, true);
+            sequenceInterfaces.add(si);
+            addAndMakeVisible(si);
+            seq->baseline_interval.setNextValue((float)seqEl->getDoubleAttribute("baseline", 0.0), false);
+            seq->min_iti.setNextValue((float)seqEl->getDoubleAttribute("minIti", 1.0), false);
+            seq->max_iti.setNextValue((float)seqEl->getDoubleAttribute("maxIti", 1.0), false);
+            seq->randomize.setNextValue(seqEl->getBoolAttribute("randomize", true), false);
+            for (auto* cEl = seqEl->getFirstChildElement(); cEl != nullptr; cEl = cEl->getNextElement())
+            {
+                if (cEl->getTagName() == "CONDITION")
+                    si->importConditionFromXml(cEl);
+            }
+            si->updateHeight();
         }
-        si->updateHeight();
-    }
-    if (sequenceInterfaces.isEmpty())
-    {
-        Sequence* seq = new Sequence(this, protocol.get());
-        protocol->addSequence(seq);
-        sequenceInterfaces.add(new OptoSequenceInterface("Sequence 1", seq, this, false));
-        addAndMakeVisible(sequenceInterfaces.getLast());
-    }
-    for (auto* si : sequenceInterfaces)
-        si->syncDeleteSequenceVisibility();
-    protocol->createTrials();
-    lastExportedCsvSnapshot.clear();
-    lastSavedTimestampDisplay.clear();
-    refreshConditionsTable();
-    if (timeline != nullptr)
-    {
-        timeline->reset();
-        timeline->setTotalTime(getTableTotalDuration());
-        timeline->setTotalTrials(protocol->getTotalTrials());
+        if (sequenceInterfaces.isEmpty())
+        {
+            Sequence* seq = new Sequence(this, protocol.get());
+            protocol->addSequence(seq);
+            sequenceInterfaces.add(new OptoSequenceInterface("Sequence 1", seq, this, false));
+            addAndMakeVisible(sequenceInterfaces.getLast());
+        }
+        for (auto* si : sequenceInterfaces)
+            si->syncDeleteSequenceVisibility();
+        protocol->createTrials();
+        lastExportedCsvSnapshot.clear();
+        lastSavedTimestampDisplay.clear();
+        refreshConditionsTable();
+        if (timeline != nullptr)
+        {
+            timeline->reset();
+            timeline->setTotalTime(getTableTotalDuration());
+            timeline->setTotalTrials(protocol->getTotalTrials());
+        }
     }
     updateBounds(0);
     resized();
