@@ -131,5 +131,5 @@ bool OptoProtocolGenerator::isOutputProcessor(GenericProcessor* processor)
         return false;
 
     const String name = processor->getName();
-    return name == "NIDAQ Output" || name == "Wave Player";
+    return name == "NIDAQ Output" || name == "Wave Player" || name == "Harp Quac";
 }
